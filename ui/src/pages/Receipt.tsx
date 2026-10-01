@@ -123,7 +123,9 @@ export default function Receipt() {
       <h2>Notice evidence</h2>
       <p>
         Notice v{d.notice.version} &middot; {language(d.notice.language)} &middot;{' '}
-        {d.notice.audio_url ? 'Recorded audio' : 'Text-to-speech'} played before the keypress
+        {d.call === null
+          ? 'Not presented on a call'
+          : `${d.notice.audio_url ? 'Recorded audio' : 'Text-to-speech'} played before the keypress`}
         <br />
         <small>SHA-256 <span className="mono">{d.notice.sha256.slice(0, 32)}…</span></small>
       </p>
@@ -153,7 +155,7 @@ export default function Receipt() {
       </ul>
 
       <p className="receipt-foot">
-        <small>This receipt records the choice captured on the call. It is not a copy of the notice itself.</small>
+        <small>This receipt records the choice captured{d.call !== null && ' on the call'}. It is not a copy of the notice itself.</small>
       </p>
     </main>
   )
