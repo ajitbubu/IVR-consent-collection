@@ -43,9 +43,11 @@ function checks(d: ConsentDetail): Check[] {
 
     if (c.provider === 'twilio') {
       const rejected = d.webhook_receipts.filter((r) => r.signature_ok === false).length
-      out.push(rejected === 0 && d.webhook_receipts.length > 0
-        ? { state: 'ok', text: 'Provider signatures verified' }
-        : { state: 'bad', text: `${rejected} webhook signature${rejected === 1 ? '' : 's'} rejected` })
+      out.push(d.webhook_receipts.length === 0
+        ? { state: 'pending', text: 'No signed webhooks received' }
+        : rejected === 0
+          ? { state: 'ok', text: 'Provider signatures verified' }
+          : { state: 'bad', text: `${rejected} webhook signature${rejected === 1 ? '' : 's'} rejected` })
     } else {
       out.push({ state: 'pending', text: 'Unsigned transport (Exotel does not sign webhooks)' })
     }
