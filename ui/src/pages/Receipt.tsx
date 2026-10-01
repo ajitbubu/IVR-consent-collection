@@ -15,9 +15,13 @@ function language(code: string): string {
   }
 }
 
+function day(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 function stamp(iso: string): string {
   const d = new Date(iso)
-  const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
+  const date = day(iso)
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })
   return `${date} · ${time}`
 }
@@ -127,7 +131,7 @@ export default function Receipt() {
         <ul>
           <li>
             {purpose}
-            {c.expires_at && <small> &middot; valid until {new Date(c.expires_at).toLocaleDateString()}</small>}
+            {c.expires_at && <small> &middot; valid until {day(c.expires_at)}</small>}
           </li>
         </ul>
       ) : <p><small>None on this receipt.</small></p>}
