@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Consents from './pages/Consents'
 import ConsentDetail from './pages/ConsentDetail'
 import Purposes from './pages/Purposes'
+import Receipt from './pages/Receipt'
 import Sessions from './pages/Sessions'
 import './styles.css'
 
@@ -22,6 +23,8 @@ const router = createBrowserRouter(
         { path: 'sessions', element: <Sessions /> },
       ],
     },
+    // Outside the console chrome: a receipt is meant to be printed or saved.
+    { path: '/consents/:id/receipt', element: <Receipt /> },
   ],
   { basename: '/console' },
 )

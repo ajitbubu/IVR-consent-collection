@@ -29,6 +29,8 @@ export default function ConsentDetail() {
         <DecisionPill decision={c.decision} />
         {!c.is_current && <Pill kind="plain">superseded</Pill>}
         {c.permits_processing && <Pill kind="good">in force</Pill>}
+        <div className="spacer" />
+        <Link className="button-link" to={`/consents/${c.consent_id}/receipt`}>Consent receipt</Link>
       </div>
 
       <div className="row">
