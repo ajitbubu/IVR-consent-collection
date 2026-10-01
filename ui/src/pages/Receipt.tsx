@@ -102,7 +102,7 @@ export default function Receipt() {
       <h2>Data Principal</h2>
       <p>
         Mobile ending {d.data_principal.phone_e164.slice(-4)} &middot;{' '}
-        {c.verification_level === 'verified' ? 'Identity verified' : 'Caller ID only (handset, not identity, verified)'}
+        {c.verification_level === 'verified' ? 'Identity verified' : 'Caller ID only · proves the handset, not the person'}
       </p>
 
       <h2>Notice evidence</h2>
