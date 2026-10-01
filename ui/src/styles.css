@@ -202,6 +202,10 @@ button.primary { background: var(--accent); color: var(--panel); border-color: v
 .receipt-checks span { display: inline-block; width: 16px; font-weight: 700; }
 .receipt-foot { margin-top: 28px !important; }
 
+@media (max-width: 760px) {
+  .receipt-tools a, .receipt-tools button { min-height: 44px; display: inline-flex; align-items: center; }
+}
+
 @media print {
   /* Paper is white whatever the OS theme: pin the light tokens. */
   :root, :root:not([data-theme='light']) {
