@@ -6,6 +6,15 @@ import { Failed, Loading } from '../components/bits'
 
 const ISSUER = import.meta.env.VITE_RECEIPT_ISSUER || 'FaceOff Privacy'
 
+// Notices store ISO 639-3 codes ('eng', 'hin'); a receipt shows the name.
+function language(code: string): string {
+  try {
+    return new Intl.DisplayNames(undefined, { type: 'language' }).of(code) ?? code
+  } catch {
+    return code
+  }
+}
+
 function stamp(iso: string): string {
   const d = new Date(iso)
   const date = d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })
@@ -107,7 +116,7 @@ export default function Receipt() {
 
       <h2>Notice evidence</h2>
       <p>
-        Notice v{d.notice.version} &middot; {d.notice.language} &middot;{' '}
+        Notice v{d.notice.version} &middot; {language(d.notice.language)} &middot;{' '}
         {d.notice.audio_url ? 'Recorded audio' : 'Text-to-speech'} played before the keypress
         <br />
         <small>SHA-256 <span className="mono">{d.notice.sha256.slice(0, 32)}…</span></small>
