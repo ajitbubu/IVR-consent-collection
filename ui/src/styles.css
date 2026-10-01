@@ -211,4 +211,5 @@ button.primary { background: var(--accent); color: var(--panel); border-color: v
   body { background: #fff; }
   .receipt { padding: 0; }
   .receipt-tools { display: none; }
+  .receipt-id { border: 1px solid var(--line); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
