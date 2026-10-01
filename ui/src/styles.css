@@ -176,7 +176,7 @@ button.primary { background: var(--accent); color: var(--panel); border-color: v
 
 /* ---------------------------------------------------------------- receipt */
 
-.receipt { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; line-height: 1.55; font-size: 14.5px; }
+.receipt { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; line-height: 1.55; font-size: 16px; }
 .receipt-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
 .receipt-note {
   background: var(--accent-soft); border-left: 3px solid var(--declined);
@@ -186,8 +186,8 @@ button.primary { background: var(--accent); color: var(--panel); border-color: v
 .receipt h1 { font-size: 28px; margin: 0 0 18px; }
 .receipt-id { background: var(--accent-soft); border-radius: var(--radius); padding: 16px; }
 .receipt-id strong { display: block; color: var(--heading); word-break: break-all; }
-.receipt-id .mono { font-size: 13px; }
-.receipt small { color: var(--ink-3); font-size: 13px; }
+.receipt-id .mono { font-size: 14px; }
+.receipt small { color: var(--ink-3); font-size: 14px; }
 .receipt-id small { display: block; margin-top: 4px; }
 .receipt h2 {
   font-size: 16px; color: var(--heading); margin: 28px 0 8px;
