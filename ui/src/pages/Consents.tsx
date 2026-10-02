@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import { DecisionPill, Failed, Loading, ProviderPill, SyncPill, when } from '../components/bits'
@@ -87,7 +87,9 @@ export default function Consents() {
               <tbody>
                 {state.data.items.map((c) => (
                   <tr key={c.consent_id} onClick={() => nav(`/consents/${c.consent_id}`)}>
-                    <td className="muted">{when(c.decided_at)}</td>
+                    <td className="muted">
+                      <Link className="row-link" to={`/consents/${c.consent_id}`}>{when(c.decided_at)}</Link>
+                    </td>
                     <td className="mono">{c.phone_masked}</td>
                     <td>{c.purpose_key}{!c.is_current && <span className="muted"> · superseded</span>}</td>
                     <td><DecisionPill decision={c.decision} /></td>

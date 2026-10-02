@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import logo from './assets/dsg_white.svg'
 import shield from './assets/shield.svg'
@@ -39,6 +39,8 @@ const PMP_MODULES: [label: string, children: string[]][] = [
   ['Settings', ['General', 'Users & Roles', 'Integrations', 'API Keys']],
 ]
 
+const MOBILE = '(max-width: 768px)'
+
 function pageTitle(pathname: string): string {
   const match = IVR_PAGES.filter(([to]) => to !== '/').find(([to]) => pathname.startsWith(to))
   return `IVR Consent — ${match ? match[1] : 'Overview'}`
@@ -66,7 +68,7 @@ function Module({ label, children, open, onToggle }: {
     <>
       <button className="sidebar-menu-btn" aria-expanded={open} onClick={onToggle}>
         <Icon name={label} /><span className="menu-label">{label}</span>
-        <span className={`menu-chevron${open ? ' open' : ''}`}>▾</span>
+        <span className={`menu-chevron${open ? ' open' : ''}`} aria-hidden="true">▾</span>
       </button>
       <div className={`sidebar-submenu${open ? ' open' : ''}`}>
         {children.map((c) => (
@@ -83,17 +85,52 @@ export default function App() {
   const { pathname } = useLocation()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE).matches)
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const navRef = useRef<HTMLElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE)
+    const onChange = () => { setIsMobile(mq.matches); setMobileOpen(false) }
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  // A closed phone drawer is off-screen: keep it out of the tab order and
+  // away from screen readers.
+  useEffect(() => {
+    if (navRef.current) navRef.current.inert = isMobile && !mobileOpen
+  }, [isMobile, mobileOpen])
+
+  // The phone drawer: move focus into it on open; Escape closes it and returns
+  // focus to the toggle that opened it.
+  useEffect(() => {
+    if (!mobileOpen) return
+    const raf = requestAnimationFrame(() =>
+      navRef.current?.querySelector<HTMLElement>('a, button:not(:disabled)')?.focus())
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setMobileOpen(false)
+      toggleRef.current?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey) }
+  }, [mobileOpen])
   const [open, setOpen] = useState<Record<string, boolean>>({ UCM: true })
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }))
 
   function toggleSidebar() {
-    if (window.matchMedia('(max-width: 768px)').matches) setMobileOpen((v) => !v)
+    if (window.matchMedia(MOBILE).matches) setMobileOpen((v) => !v)
     else setCollapsed((v) => !v)
   }
 
   return (
     <div className={`app-layout${collapsed ? ' sidebar-collapsed' : ''}`}>
-      <nav className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`} aria-label="Main">
+      <a className="skip-link" href="#main"
+         onClick={(e) => { e.preventDefault(); mainRef.current?.focus() }}>Skip to content</a>
+      <nav id="sidebar" ref={navRef} aria-label="Main"
+           className={`sidebar${collapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`}>
         <div className="sidebar-logo">
           <img className="sidebar-logo-img" src={logo} alt="datasafeguard" width={316} height={54} />
           <span className="sidebar-logo-collapsed"><img src={shield} alt="datasafeguard" /></span>
@@ -102,7 +139,7 @@ export default function App() {
           <div className="sidebar-section">
             <button className="sidebar-menu-btn active" aria-expanded={!!open.UCM} onClick={() => toggle('UCM')}>
               <Icon name="UCM" /><span className="menu-label">UCM</span>
-              <span className={`menu-chevron${open.UCM ? ' open' : ''}`}>▾</span>
+              <span className={`menu-chevron${open.UCM ? ' open' : ''}`} aria-hidden="true">▾</span>
             </button>
             <div className={`sidebar-submenu${open.UCM ? ' open' : ''}`}>
               {PMP_UCM.map((c) => (
@@ -139,19 +176,21 @@ export default function App() {
 
       <div className="main-wrapper">
         <header className="topbar">
-          <button className="topbar-toggle" onClick={toggleSidebar} title="Toggle sidebar" aria-label="Toggle sidebar">
+          <button ref={toggleRef} className="topbar-toggle" onClick={toggleSidebar} title="Toggle sidebar"
+                  aria-label="Toggle sidebar" aria-controls="sidebar"
+                  aria-expanded={isMobile ? mobileOpen : !collapsed}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                  strokeLinecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <div className="topbar-title">{pageTitle(pathname)}</div>
           <div className="topbar-actions">
-            <button className="topbar-bell" title="Notifications" aria-label="Notifications">
+            <button className="topbar-bell" title="Notifications (coming soon)" aria-label="Notifications (coming soon)" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" /></svg>
             </button>
             <div className="topbar-avatar" title="Read-only operator">OP</div>
           </div>
         </header>
-        <main className="main">
+        <main className="main" id="main" ref={mainRef} tabIndex={-1}>
           <Outlet />
         </main>
       </div>

@@ -6,9 +6,10 @@
   --heading: #0d172c;
   --ink: #18243a;
   --ink-2: #485671;
-  --ink-3: #687a95;
+  --ink-3: #5d6d86;
   --line: #dfe6ee;
   --line-2: #cfd9e5;
+  --field-border: #8794a6;
   --accent: #234db7;
   --accent-hover: #2859d2;
   --accent-solid: #234db7;
@@ -19,9 +20,9 @@
   --nav-muted: #8898b7;
   --th-bg: #234db7;
   --th-ink: #ffffff;
-  --granted: #10845c;
+  --granted: #0f7c56;
   --granted-soft: #e7f5ed;
-  --declined: #b66a12;
+  --declined: #a15e10;
   --declined-soft: #fff3e4;
   --withdrawn: #c13f4d;
   --withdrawn-soft: #fff0f0;
@@ -43,6 +44,7 @@
     --ink-3: #8b9bb6;
     --line: #22314d;
     --line-2: #2d3f60;
+    --field-border: #5a6b85;
     --accent: #7a9cff;
     --accent-hover: #93afff;
     --accent-solid: #2f5bd0;
@@ -126,11 +128,11 @@ a { color: inherit; }
 .sidebar-submenu .sidebar-menu-btn { padding-left: 42px; font-size: 13px; }
 .sidebar-group-label {
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px;
-  color: #64748b; padding: 12px 12px 6px 42px;
+  color: #94a3b8; padding: 12px 12px 6px 42px;
 }
 .sidebar-footer {
   margin-top: auto; padding: 16px; border-top: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: center; font-size: 11px; color: #475569;
+  text-align: center; font-size: 11px; color: #94a3b8;
 }
 .sidebar-footer svg { display: block; margin: 0 auto 4px; }
 .sidebar.collapsed .sidebar-footer span { display: none; }
@@ -261,7 +263,7 @@ td.num { font-variant-numeric: tabular-nums; }
 }
 input, select, button {
   font: inherit; font-size: 13.5px; padding: 9px 11px;
-  border: 1px solid var(--line); border-radius: 8px;
+  border: 1px solid var(--field-border); border-radius: 8px;
   background: var(--panel); color: var(--ink);
 }
 input:focus, select:focus { outline: none; border-color: #8eabf7; box-shadow: 0 0 0 3px #3568e81f; }
@@ -369,12 +371,35 @@ body:has(.receipt) { background: var(--bg); }
 @media print {
   /* Paper is white whatever the OS theme: pin the light tokens. */
   :root, :root:not([data-theme='light']) {
-    --panel: #ffffff; --heading: #0d172c; --ink: #18243a; --ink-2: #485671; --ink-3: #687a95;
-    --line: #dfe6ee; --accent: #234db7; --accent-soft: #eaf0ff; --granted: #10845c;
-    --declined: #b66a12; --declined-soft: #fff3e4; --danger: #c13f4d;
+    --panel: #ffffff; --heading: #0d172c; --ink: #18243a; --ink-2: #485671; --ink-3: #5d6d86;
+    --line: #dfe6ee; --accent: #234db7; --accent-soft: #eaf0ff; --granted: #0f7c56;
+    --declined: #a15e10; --declined-soft: #fff3e4; --danger: #c13f4d;
   }
   body { background: #fff; }
   .receipt { padding: 0; margin: 0; border: none; box-shadow: none; }
   .receipt-tools { display: none; }
   .receipt-id { border: 1px solid var(--line); print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
+
+/* ---------------------------------------------------------------- accessibility */
+
+.skip-link {
+  position: absolute; left: 12px; top: -48px; z-index: 200;
+  background: var(--accent-solid); color: #fff; padding: 10px 14px; border-radius: 8px;
+  font-weight: 650; text-decoration: none; transition: top 0.15s;
+}
+.skip-link:focus { top: 12px; outline: 2px solid #fff; outline-offset: 2px; }
+.main:focus { outline: none; }
+
+/* A real link/button inside a clickable row, so the row works from the keyboard. */
+td a.row-link { color: inherit; font-weight: inherit; text-decoration: none; }
+td a.row-link:hover, td a.row-link:focus-visible { text-decoration: underline; }
+td a.row-link:focus-visible, .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.link-btn {
+  background: none; border: none; padding: 0; font: inherit; color: var(--accent);
+  font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+}
+.link-btn:hover { border-color: transparent; }
+tr.is-current td { font-weight: 650; color: var(--ink); }
+
+.topbar-bell:disabled { cursor: default; opacity: 1; }

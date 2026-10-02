@@ -135,9 +135,14 @@ export default function ConsentDetail() {
             <thead><tr><th>When</th><th>Decision</th><th>Channel</th></tr></thead>
             <tbody>
               {d.history.map((h) => (
-                <tr key={h.consent_id}
-                    style={{ cursor: 'default', opacity: h.consent_id === c.consent_id ? 1 : 0.68 }}>
-                  <td className="muted">{when(h.decided_at)}</td>
+                <tr key={h.consent_id} style={{ cursor: 'default' }}
+                    className={h.consent_id === c.consent_id ? 'is-current' : undefined}
+                    aria-current={h.consent_id === c.consent_id ? 'true' : undefined}>
+                  <td className="muted">
+                    {h.consent_id === c.consent_id
+                      ? when(h.decided_at)
+                      : <Link className="row-link" to={`/consents/${h.consent_id}`}>{when(h.decided_at)}</Link>}
+                  </td>
                   <td><DecisionPill decision={h.decision} /></td>
                   <td className="muted">{h.channel} &middot; {h.provider}</td>
                 </tr>

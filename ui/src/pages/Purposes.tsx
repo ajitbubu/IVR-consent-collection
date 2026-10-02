@@ -42,7 +42,13 @@ export default function Purposes() {
               <tbody>
                 {p.notices.map((n) => (
                   <tr key={n.id} onClick={() => setOpen(open === n.id ? null : n.id)}>
-                    <td>{n.language}</td>
+                    <td>
+                      <button type="button" className="link-btn" aria-expanded={open === n.id}
+                              aria-controls={`notice-${n.id}`}
+                              onClick={(e) => { e.stopPropagation(); setOpen(open === n.id ? null : n.id) }}>
+                        {n.language}
+                      </button>
+                    </td>
                     <td className="num">v{n.version}</td>
                     <td>
                       {n.retired ? <Pill kind="plain">retired</Pill>
@@ -56,7 +62,7 @@ export default function Purposes() {
               </tbody>
             </table>
             {p.notices.filter((n) => n.id === open).map((n) => (
-              <div className="notice-box" key={n.id} style={{ marginTop: 12 }}>{n.body_text}</div>
+              <div className="notice-box" key={n.id} id={`notice-${n.id}`} style={{ marginTop: 12 }}>{n.body_text}</div>
             ))}
             <p className="muted" style={{ marginBottom: 0, marginTop: 10 }}>
               Published notices are frozen. A wording change creates a new version, and
