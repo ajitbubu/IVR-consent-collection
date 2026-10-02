@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import logo from './assets/dsg_white.svg'
 
 const TITLES: [prefix: string, title: string][] = [
   ['/consents', 'Consents'],
@@ -15,7 +16,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <p className="brand">datasafeguard</p>
+        <img className="brand-logo" src={logo} alt="datasafeguard" width={316} height={54} />
         <p className="brand-sub">ID-PRIVACY&reg; &middot; IVR</p>
         <p className="nav-label">Consent capture</p>
         <nav className="nav">

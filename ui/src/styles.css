@@ -81,7 +81,7 @@ a { color: inherit; }
   background: var(--nav-bg); color: var(--nav-ink);
   padding: 24px 16px; display: flex; flex-direction: column;
 }
-.brand { color: #fff; font-weight: 750; font-size: 16px; letter-spacing: 0.01em; margin: 3px 12px 0; }
+.brand-logo { display: block; width: 180px; height: auto; margin: 4px 12px 0; }
 .brand-sub {
   color: #97a6c4; font-size: 11px; font-weight: 500; letter-spacing: 0.13em;
   text-transform: uppercase; margin: 4px 12px 26px;
@@ -248,6 +248,7 @@ button.primary:hover { background: var(--accent-solid-hover); }
   .app { grid-template-columns: 1fr; }
   .sidebar { padding: 14px 16px; }
   .brand-sub, .nav-label, .side-foot { display: none; }
+  .brand-logo { width: 150px; margin: 2px 0 0; }
   .nav { flex-direction: row; flex-wrap: wrap; margin-top: 10px; }
   .nav a { padding: 10px 12px; min-height: 44px; }
   .topbar { padding: 0 16px; height: 54px; }
