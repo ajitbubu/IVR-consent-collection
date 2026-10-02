@@ -20,6 +20,18 @@
 
 ## Console
 
+### Not-found consent page blames the network
+
+**What:** When a deep link points to an unknown consent ID, show "No consent with this ID" on the console detail page instead of "Could not load: unknown consent. Check that the consent service is reachable."
+
+**Why:** The service answered with a 404, so the reachability hint sends the operator looking for an outage that doesn't exist.
+
+**Context:** Found by /qa on 2026-10-01 (ISSUE-003, low, content). To reproduce: open `/console/consents/01ZZZZZZZZZZZZZZZZZZZZZZZZ`. The message comes from the shared `Failed` component in `ui/src/components/bits.tsx`. It needs a not-found variant, chosen when the API status is 404.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
 ### Make partial phone search use an index
 
 **What:** Replace the `phone_e164 LIKE '%q%'` search in the console with an indexed search: a `pg_trgm` GIN index, or a suffix search on a reversed-phone btree index.
