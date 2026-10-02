@@ -34,7 +34,7 @@ from app.consent_service import (
 )
 from app.db import get_session
 from app.identity import NullCrm, PhoneNormalisationError, enrich_from_crm
-from app.models import Consent, DataPrincipal, NoticeVersion, Purpose
+from app.models import Consent, DataPrincipal, NoticeVersion, Purpose, WebhookReceipt
 from app.telephony.twilio import TwilioProvider, gather_twiml
 from app.webhook_common import ingest
 
@@ -226,13 +226,44 @@ async def status_callback(request: Request, db: Session = Depends(get_session)) 
     if sess is None:
         return Response(status_code=204)
 
+    # Every verified status callback is already a receipt; one that is older
+    # than a callback already applied must not rewind the call.
+    seq = _sequence(event.raw.get("SequenceNumber"))
+    if seq is not None:
+        current = request.state.webhook_receipt
+        seen = db.execute(
+            select(WebhookReceipt.params).where(
+                WebhookReceipt.ivr_session_id == sess.id,
+                WebhookReceipt.route == "status",
+                WebhookReceipt.signature_ok.is_(True),
+                WebhookReceipt.id != current.id,
+            )
+        ).scalars()
+        applied = [n for n in (_sequence(p.get("SequenceNumber")) for p in seen) if n is not None]
+        newest = max(applied, default=None)
+        if newest is not None and seq < newest:
+            log.info("twilio /status: stale seq %s < %s for session=%s", seq, newest, sess.id)
+            return Response(status_code=204)
+
     sess.call_status = event.call_status
     if event.answered_by:
         sess.answered_by = event.answered_by
-    if event.ended_at:
+    # Timestamp is when this event happened; it is the end time only once the
+    # call is over.
+    if event.ended_at and event.call_status in _TERMINAL:
         sess.ended_at = event.ended_at
     db.flush()
     return Response(status_code=204)
+
+
+_TERMINAL = {"completed", "busy", "failed", "no-answer", "canceled"}
+
+
+def _sequence(raw: str | None) -> int | None:
+    try:
+        return int(raw) if raw is not None else None
+    except ValueError:
+        return None
 
 
 @router.post("/recording")

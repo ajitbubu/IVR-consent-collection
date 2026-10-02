@@ -325,3 +325,32 @@ def test_inbound_voice_receipt_is_linked_to_the_session_it_creates(db, marketing
     ).scalar_one()
     assert receipt.signature_ok is True
     assert receipt.ivr_session_id == sess.id
+
+
+# Regression: ISSUE-005 — an older status callback arriving late overwrote "completed"
+# Found by /qa on 2026-10-02
+# Report: .gstack/qa-reports/run-20261002T142242Z/qa-report-ivr-consent-2026-10-02.md
+def test_late_status_callback_does_not_rewind_the_call(db, marketing_purpose, client):
+    sid = _session(client)
+    post_signed(client, f"/twilio/voice?session={sid}",
+                {"CallSid": "CAseq", "From": "+919876543210", "To": "+18668494269",
+                 "Direction": "outbound-api"})
+
+    def status(call_status, seq, ts):
+        r = post_signed(client, "/twilio/status",
+                        {"CallSid": "CAseq", "CallStatus": call_status, "SequenceNumber": seq,
+                         "Timestamp": ts})
+        assert r.status_code == 204
+
+    status("in-progress", "1", "Fri, 02 Oct 2026 14:29:40 +0000")
+    sess = db.get(IvrSession, sid)
+    db.refresh(sess)
+    assert sess.call_status == "in-progress"
+    assert sess.ended_at is None  # a call that is still going has not ended
+
+    status("completed", "3", "Fri, 02 Oct 2026 14:30:05 +0000")
+    status("ringing", "0", "Fri, 02 Oct 2026 14:29:30 +0000")  # delivered last, happened first
+
+    db.refresh(sess)
+    assert sess.call_status == "completed"
+    assert sess.ended_at.isoformat().startswith("2026-10-02T14:30:05")
