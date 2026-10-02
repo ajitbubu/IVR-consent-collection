@@ -18,7 +18,7 @@ export function SyncPill({ state }: { state: string }) {
  *  carried a consent is not decoration -- it tells an operator how much the
  *  transport itself proves. */
 export function ProviderPill({ provider }: { provider: string }) {
-  return <Pill kind="plain">{provider}</Pill>
+  return <Pill kind="provider">{provider}</Pill>
 }
 
 export function when(iso: string | null | undefined): string {

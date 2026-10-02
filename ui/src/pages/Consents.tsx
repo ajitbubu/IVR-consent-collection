@@ -73,7 +73,7 @@ export default function Consents() {
       {state.loading && !state.data && <Loading what="consents" />}
 
       {state.data && (
-        <div className="panel" style={{ padding: '16px 6px 6px' }}>
+        <div className="panel table-panel">
           {state.data.items.length === 0 ? (
             <div className="empty">Nothing matches those filters.</div>
           ) : (
@@ -101,7 +101,7 @@ export default function Consents() {
           )}
 
           {state.data.total > PAGE && (
-            <div className="filters" style={{ padding: '12px 10px 6px' }}>
+            <div className="filters" style={{ padding: '12px 16px', margin: 0, borderTop: '1px solid var(--line)' }}>
               <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
                 Previous
               </button>

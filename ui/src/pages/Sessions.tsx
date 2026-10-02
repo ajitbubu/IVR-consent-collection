@@ -37,7 +37,7 @@ export default function Sessions() {
       {state.loading && !state.data && <Loading what="calls" />}
 
       {state.data && (
-        <div className="panel" style={{ padding: '16px 6px 6px' }}>
+        <div className="panel table-panel">
           {state.data.items.length === 0 ? (
             <div className="empty">No calls match.</div>
           ) : (
