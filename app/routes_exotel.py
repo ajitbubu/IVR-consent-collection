@@ -157,10 +157,15 @@ def readback(request: Request, db: Session = Depends(get_session)) -> Response:
         .limit(1)
     ).scalar_one_or_none()
     if consent is None:
-        return Response(
-            "We could not record your response. Someone will call you back.",
-            media_type="text/plain",
-        )
+        # Silence or an unoffered key is a recorded non-decision, not a failure:
+        # say so, and promise a callback only when one is actually owed.
+        if sess.outcome in ("no_input", "invalid_key"):
+            text = "We did not receive a valid response. Nothing has changed. Thank you."
+        elif sess.outcome == "verification_required":
+            text = "We need to verify your identity first. Someone will call you back."
+        else:
+            text = "We could not record your response. Someone will call you back."
+        return Response(text, media_type="text/plain")
 
     purpose = db.get(Purpose, consent.purpose_id)
     phrase = {

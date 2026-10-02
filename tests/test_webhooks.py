@@ -75,6 +75,21 @@ def test_unoffered_key_returns_302_and_no_consent(db, marketing_purpose, client)
     assert sess.outcome == "invalid_key"
 
 
+# Regression: ISSUE-002 — readback after silence promised a callback that never comes
+# Found by /qa on 2026-10-01
+# Report: .gstack/qa-reports/qa-report-ivr-consent-2026-10-01.md
+def test_readback_after_no_decision_says_nothing_changed(db, marketing_purpose, client):
+    for call_sid, digits in (("cs-silent", None), ("cs-badkey", '"7"')):
+        s = _create_session(client)
+        params = {"CustomField": s["session_id"], "CallSid": call_sid}
+        client.get("/exotel/decision", params={**params, **({"digits": digits} if digits else {})})
+
+        r = client.get("/exotel/readback", params=params)
+        assert r.status_code == 200
+        assert "nothing has changed" in r.text.lower(), call_sid
+        assert "call you back" not in r.text.lower(), call_sid
+
+
 def test_unknown_session_returns_302_never_200(db, marketing_purpose, client):
     """302 means the write failed. A caller is never told their consent was
     recorded when it was not."""
