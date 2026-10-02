@@ -5,6 +5,9 @@ presses a key, and the decision is stored in Postgres as the write-ahead
 record. A separate worker then pushes it to UCM, so a UCM outage can never
 lose a consent.
 
+How to run it and integrate it with the ID-PRIVACY® platform (including the
+MongoDB port): [id-privacy-integration.md](id-privacy-integration.md).
+
 ## Components
 
 ```mermaid
