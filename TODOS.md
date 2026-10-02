@@ -20,6 +20,18 @@
 
 ## Console
 
+### Console has no favicon
+
+**What:** Add a favicon to `ui/index.html` (for example `<link rel="icon" href="/console/favicon.svg">`) and serve it from `ui/public/`.
+
+**Why:** Every console page logs a 404 for `/favicon.ico`, which adds noise to the browser console and to QA console-error counts.
+
+**Context:** Found by /qa on 2026-10-02 (ISSUE-007, low). The new sidebar logo `ui/src/assets/dsg_white.svg` is white-on-transparent, so it would disappear on a light browser tab. Use a dark or shield-only variant for the favicon.
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
 ### Not-found consent page blames the network
 
 **What:** When a deep link points to an unknown consent ID, show "No consent with this ID" on the console detail page instead of "Could not load: unknown consent. Check that the consent service is reachable."
