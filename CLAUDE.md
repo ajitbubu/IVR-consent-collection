@@ -21,7 +21,7 @@ Key routing rules:
 
 Run from the repo root: `pytest -q`.
 
-The suite needs a Postgres it can drop and recreate (`tests/conftest.py` connects as the `postgres` superuser and rebuilds the `ivr_consent_test` database). Point `PGHOST`/`PGPORT` at it. A throwaway container works:
+The suite needs a Postgres it can drop and recreate (`tests/conftest.py` connects as the `postgres` superuser and rebuilds the `ivr_consent_test` database). Point `PGHOST`/`PGPORT` at it. The fixtures also shell out to the `psql` client, so it must be on `PATH` (`brew install libpq`, then add its `bin` to `PATH`). A throwaway server works:
 
 ```bash
 docker run -d --name ivr-qa-pg -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:5435:5432 postgres:16
