@@ -4,12 +4,14 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health, router as service_router
 from app.console_api import router as console_router
+from app.identity import PhoneNormalisationError
 from app.routes_exotel import router as exotel_router
 from app.routes_twilio import router as twilio_router
 
@@ -34,6 +36,12 @@ def create_app() -> FastAPI:
     app.include_router(service_router)
     app.include_router(console_router)
     app.include_router(health)
+
+    # A number that cannot be normalised is bad input on every route that
+    # takes one -- the service API, the console search and the webhooks.
+    @app.exception_handler(PhoneNormalisationError)
+    def bad_phone(_request: Request, exc: PhoneNormalisationError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     # Dev only: the console runs on the Vite port. In production the built
     # console is served as static files from the same origin.

@@ -171,3 +171,26 @@ def test_read_consents_by_phone_in_any_shape(db, marketing_purpose, client):
         r = client.get("/v1/consents", params={"phone_e164": shape})
         assert r.status_code == 200, shape
         assert r.json()["consents"][0]["decision"] == "granted"
+
+
+# Regression: ISSUE-001 — a malformed phone number returned 500 instead of 400
+# Found by /qa on 2026-10-01
+# Report: .gstack/qa-reports/qa-report-ivr-consent-2026-10-01.md
+def test_malformed_phone_is_rejected_not_a_server_error(db, marketing_purpose, client):
+    r = client.post("/v1/sessions", json={
+        "direction": "ivr_outbound", "phone_e164": "not-a-phone",
+        "purpose_key": "marketing_outreach",
+    })
+    assert r.status_code == 400, r.text
+
+    r = client.get("/v1/consents", params={"phone_e164": "abc"})
+    assert r.status_code == 400, r.text
+
+    # A withheld caller id arrives as no CallFrom at all.
+    r = client.get("/exotel/identify", params={
+        "CallSid": "cs-withheld", "purpose": "marketing_outreach", "Direction": "incoming",
+    })
+    assert r.status_code == 400, r.text
+    assert db.execute(
+        select(IvrSession).where(IvrSession.call_sid == "cs-withheld")
+    ).scalar_one_or_none() is None
