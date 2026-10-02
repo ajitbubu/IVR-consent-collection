@@ -33,7 +33,7 @@ from app.consent_service import (
     record_notice_served,
 )
 from app.db import get_session
-from app.identity import NullCrm, enrich_from_crm
+from app.identity import NullCrm, PhoneNormalisationError, enrich_from_crm
 from app.models import Consent, DataPrincipal, NoticeVersion, Purpose
 from app.telephony.twilio import TwilioProvider, gather_twiml
 from app.webhook_common import ingest
@@ -80,14 +80,23 @@ async def voice(request: Request, db: Session = Depends(get_session)) -> Respons
         if not purpose_code:
             log.warning("twilio /voice: no session and no purpose")
             return _hangup("We are unable to continue this call right now.")
-        sess = create_session(
-            db,
-            direction=event.direction or "ivr_inbound",
-            phone_raw=event.from_number or "",
-            purpose_code=purpose_code,
-            language=request.query_params.get("lang", "eng"),
-            provider="twilio",
-        )
+        try:
+            sess = create_session(
+                db,
+                direction=event.direction or "ivr_inbound",
+                phone_raw=event.from_number or "",
+                purpose_code=purpose_code,
+                language=request.query_params.get("lang", "eng"),
+                provider="twilio",
+            )
+        except PhoneNormalisationError:
+            # A withheld caller id ("anonymous") identifies nobody, so there is
+            # no one to record a consent for. Twilio needs TwiML, not a 400.
+            log.warning("twilio /voice: withheld caller id, CallSid=%s", event.call_ref)
+            return _hangup(
+                "We need your caller ID to record your choice. "
+                "Please call again without hiding your number. Goodbye."
+            )
 
     if sess.call_sid is None and sess.provider != "twilio":
         # The session was created before the provider was settled; the call

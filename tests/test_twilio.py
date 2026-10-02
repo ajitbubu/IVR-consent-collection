@@ -296,3 +296,15 @@ def test_both_providers_write_the_same_consent_shape(db, marketing_purpose, clie
     # Same person, same purpose: the second supersedes the first regardless
     # of which provider carried it.
     assert sum(1 for r in rows if r.is_current) == 1
+
+
+# Regression: ISSUE-004 — a withheld caller id made Twilio play "application error"
+# Found by /qa on 2026-10-02
+# Report: .gstack/qa-reports/run-20261002T142242Z/qa-report-ivr-consent-2026-10-02.md
+def test_withheld_caller_id_gets_a_spoken_hangup_not_an_error(db, marketing_purpose, client):
+    r = post_signed(client, "/twilio/voice?purpose=marketing_outreach",
+                    {"CallSid": "CAanon", "From": "anonymous", "To": "+18668494269",
+                     "Direction": "inbound"})
+    assert r.status_code == 200, r.text
+    assert "<Say>" in r.text and "<Hangup/>" in r.text
+    assert db.execute(select(IvrSession)).scalars().all() == []
