@@ -308,3 +308,20 @@ def test_withheld_caller_id_gets_a_spoken_hangup_not_an_error(db, marketing_purp
     assert r.status_code == 200, r.text
     assert "<Say>" in r.text and "<Hangup/>" in r.text
     assert db.execute(select(IvrSession)).scalars().all() == []
+
+
+# Regression: ISSUE-006 — the inbound /voice receipt was never linked to its session
+# Found by /qa on 2026-10-02
+# Report: .gstack/qa-reports/run-20261002T142242Z/qa-report-ivr-consent-2026-10-02.md
+def test_inbound_voice_receipt_is_linked_to_the_session_it_creates(db, marketing_purpose, client):
+    r = post_signed(client, "/twilio/voice?purpose=marketing_outreach",
+                    {"CallSid": "CAinbound", "From": "+19735550123", "To": "+18668494269",
+                     "Direction": "inbound"})
+    assert r.status_code == 200
+
+    sess = db.execute(select(IvrSession).where(IvrSession.call_sid == "CAinbound")).scalar_one()
+    receipt = db.execute(
+        select(WebhookReceipt).where(WebhookReceipt.route == "voice")
+    ).scalar_one()
+    assert receipt.signature_ok is True
+    assert receipt.ivr_session_id == sess.id

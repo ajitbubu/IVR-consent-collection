@@ -62,7 +62,7 @@ async def ingest(
     # not a merge with the query string, which rides on the URL instead.
     # Merging makes the stored triple fail to re-verify later, which defeats
     # the point of keeping it.
-    db.add(WebhookReceipt(
+    receipt = WebhookReceipt(
         id=str(ULID()),
         ivr_session_id=sess.id if sess else None,
         provider=provider_name,
@@ -72,8 +72,12 @@ async def ingest(
         signature_ok=verification.ok if verification.cryptographic else None,
         body_sha256=hashlib.sha256(body).digest() if body else None,
         params={k: v for k, v in form.items() if k.lower() != "authtoken"},
-    ))
+    )
+    db.add(receipt)
     db.flush()
+    # An inbound call's first webhook arrives before its session exists; the
+    # route that creates the session links this receipt to it afterwards.
+    request.state.webhook_receipt = receipt
     return event, verification, sess
 
 

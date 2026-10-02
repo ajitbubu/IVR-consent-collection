@@ -108,6 +108,11 @@ async def voice(request: Request, db: Session = Depends(get_session)) -> Respons
     if event.call_ref:
         attach_call(db, sess, call_sid=event.call_ref, call_to=event.to_number)
 
+    receipt = request.state.webhook_receipt
+    if receipt.ivr_session_id is None:
+        receipt.ivr_session_id = sess.id
+        db.flush()
+
     principal = db.get(DataPrincipal, sess.data_principal_id)
     try:
         enrich_from_crm(db, principal, NullCrm())
