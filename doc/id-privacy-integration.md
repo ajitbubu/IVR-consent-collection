@@ -27,7 +27,7 @@ other channel.
 | 1 | Grant | `granted` / `active`, expires after the purpose's retention period |
 | 2 | Decline | `declined` |
 | 9 | Withdraw | `withdrawn` |
-| Silence, wrong key, voicemail, withheld caller ID | none | No consent. The call outcome is recorded |
+| Silence, wrong key, voicemail, withheld caller ID | none | No consent. The call outcome is recorded on the session (a withheld caller ID creates no session, so nothing is recorded) |
 
 Two telephony providers sit behind one interface:
 
@@ -63,7 +63,7 @@ flowchart LR
 6. **Evidence.** For each consent the service keeps:
    - the webhook receipts (with Twilio signatures);
    - the notice hash;
-   - the recording reference and hash;
+   - the recording reference and hash (planned: today only an empty recording placeholder is created, see §7 T4);
    - the per-person hash chain, verifiable with `GET /v1/consents/{id}/evidence`.
 
 A consent is never edited. A new decision supersedes the previous one (`is_current=false`, `superseded_by`), so the history of what was relied on and when stays intact.
@@ -83,7 +83,7 @@ uvicorn app.main:app --port 8088        # API + webhooks + console at /console
 python -m app.worker                    # outbox → ID-PRIVACY®
 ```
 
-Configuration is in `.env.example`. No secret has a default except the two placeholder keys flagged in §7.
+Configuration is in `.env.example`. No secret has a default except the two placeholder keys `PHONE_HMAC_KEY` and `ATTRIBUTE_KEY`, which must be set from KMS before go-live (§6).
 
 | Variable | Purpose |
 |---|---|
@@ -113,7 +113,7 @@ A **purpose** (`code`, `name`, `retention_days`, `requires_verification`, and `u
 | `GET /v1/consents/{id}/evidence` | Full evidence bundle and chain verification |
 | `POST /v1/consents/withdraw?phone_e164=…` | Out-of-call withdrawal (see §4.3) |
 | `/console` | Operator console: overview, consents (phones masked in lists), calls, purposes, printable DPDP receipt |
-| `GET /readyz` | Liveness plus outbox lag (alert on `outbox_lag_seconds`) |
+| `GET /readyz` | Readiness: database plus outbox lag (alert on `outbox_lag_seconds`). `GET /healthz` is liveness |
 
 ---
 
@@ -160,7 +160,7 @@ The ID-PRIVACY® side must:
 | Treat `Idempotency-Key` as unique; return `200`/`201` on first write and `409` (or the original `201`) on a repeat | The worker retries; duplicates must not create two consents |
 | Return `{"consent_ref": "…"}` | Shown in the IVR console and evidence |
 | **Order by `decided_at`, not by arrival** | An IVR grant can arrive minutes late (retry, Exotel corroboration hold). If a PMP withdrawal for the same person and purpose has a later `decided_at`, the withdrawal must stay current |
-| Return `4xx` (not `429`) only for a genuinely bad payload | `4xx` pauses that row for an operator; `5xx`/`429`/timeouts retry with backoff |
+| Return `4xx` (not `429`) only for a genuinely bad payload | Anything other than `200`/`201`/`409`/`429`/`5xx` pauses that row for an operator, including `202`, `204` and redirects; `5xx`/`429`/timeouts retry with backoff |
 | Map `purpose_key` to the ledger's purpose | Set `purpose.ucm_purpose_key` to the ID-PRIVACY® purpose ID |
 | (Planned) accept an evidence update for an existing `external_consent_id` | Recording URI and hash arrive after hang-up (eng-review task T4) |
 
@@ -198,7 +198,7 @@ The console already uses the PMP navigation (UCM › IVR Consent) and header. Tw
 | Option | How | Notes |
 |---|---|---|
 | **Link out** (simplest) | PMP's UCM menu links to `https://<ivr-host>/console/...` | Separate origin; needs SSO at the IVR host |
-| **Same origin** (recommended) | PMP's gateway routes `/ivr/console/*` and `/ivr/api/console/*` to this service | One login and one look; set Vite `base` to `/ivr/console/` |
+| **Same origin** (recommended) | PMP's gateway routes `/ivr/console/*`, `/ivr/api/console/*` and `/ivr/v1/consents/*/evidence` (receipt and evidence panel) to this service | One login and one look. Today `/console` is hard-coded as the router basename (`ui/src/main.tsx`) and the FastAPI mount (`app/main.py`), so serving under `/ivr/` also needs those changed plus Vite `base` and `VITE_API_BASE` |
 
 Authentication: the console and `/v1` currently have **no auth in code** (eng-review task T3). The planned design is a fail-closed check that trusts identity headers set by the PMP gateway (SSO user or mTLS subject plus a shared proxy secret). That identity drives the avatar and roles.
 
@@ -250,7 +250,7 @@ Alternative: write `consents` straight into the ID-PRIVACY® ledger's collection
 - **JSON canonicalisation.** `canonical_json` sorts keys, so BSON key order is harmless. Store payload numbers as integers/strings, never floats.
 - **Append-only, enforced.** Give the app a custom role with only `find` and `insert` on `consent_events` and `webhook_receipts`. Without `update`/`remove`, the audit trail can't be rewritten through the app's credentials. This is easier to enforce than in Postgres.
 - **Daily anchor.** A change stream or a daily job over `consent_events` produces the per-day digest for WORM (write-once) storage (eng-review T5).
-- **Connection pool.** Size `maxPoolSize` at least as large as concurrent handler threads, with a short `waitQueueTimeoutMS`. The Postgres build locked up under load at about 100 concurrent calls for exactly this reason (see `.gstack/benchmark-reports/2026-10-01-load-benchmark.md`).
+- **Connection pool.** Size `maxPoolSize` at least as large as concurrent handler threads, with a short `waitQueueTimeoutMS`. The Postgres build locked up under load at about 100 concurrent calls for exactly this reason (2026-10-01 local load benchmark: 40 handler threads against a 15-connection pool; the report is not kept in the repo).
 
 ### 5.4 Code changes for the port
 
@@ -285,6 +285,8 @@ Estimate: about 2–3 weeks for a human team, or 1–2 days with Claude Code, pl
 
 ## 7. Known gaps (from the 2026-10-01 eng review, CSO audit and QA)
 
+The T-numbers used throughout this doc are defined in this table.
+
 | ID | Gap | Impact |
 |---|---|---|
 | T1 | Outbox can deliver a person's decisions out of order | A withdrawal can reach ID-PRIVACY® before the grant it cancels (§5.2 #5 fixes it in the Mongo port) |
@@ -292,6 +294,6 @@ Estimate: about 2–3 weeks for a human team, or 1–2 days with Claude Code, pl
 | T3 | No auth on `/v1` and console | Must sit behind the PMP gateway until fixed |
 | T4 | Recording evidence never sent to ID-PRIVACY® | Evidence split across systems |
 | T5–T6 | Daily anchor not scheduled; audit tables not append-only in Postgres | Tamper-evidence incomplete (§5.3 covers Mongo) |
-| T7–T8 | Write-failure path; out-of-call withdrawal channel | See the eng review report |
+| T7–T8 | Write-failure path (savepoint plus explicit commit on decision); dedicated out-of-call withdrawal path (`/v1/consents/withdraw` ignores `channel` and `reason` today) | A failed write can leave a call without a clear outcome; withdrawals from PMP are recorded as `ivr_inbound` |
 | Load | Pool/thread lockup at ~100 concurrent calls; UCM delivery ~20/s | Size pools; parallelise the worker per person |
 | Outbound | `place_call_*` has no API caller | Campaign dialler or endpoint needed |

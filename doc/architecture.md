@@ -1,6 +1,6 @@
 # IVR Consent Capture: architecture and flows
 
-As built at `a19b1e6` (2026-10-01). A caller hears a versioned DPDP notice,
+As built at `99c7b74` (2026-10-03). A caller hears a versioned DPDP notice,
 presses a key, and the decision is stored in Postgres as the write-ahead
 record. A separate worker then pushes it to UCM, so a UCM outage can never
 lose a consent.
@@ -37,7 +37,7 @@ flowchart LR
 
     exotel -- GET --> rex
     twilio -- POST --> rtw
-    rex --> ingest
+    rex -->|decision only| ingest
     rtw --> ingest
     ingest --> cs
     svc --> api --> cs
@@ -105,7 +105,7 @@ sequenceDiagram
     X-->>C: readback
     C->>X: hangs up
     X->>S: POST /status (delivery not guaranteed)
-    S->>DB: call_status, AnsweredBy, RecordingUrl to call_artifact
+    S->>DB: call_status, AnsweredBy, recording placeholder in call_artifact (URL not kept yet)
 ```
 
 ## Call flow: Twilio (outside India)
@@ -154,7 +154,7 @@ stateDiagram-v2
     Active --> Superseded: new decision for same purpose
     Declined --> Superseded: new decision for same purpose
     Withdrawn --> Superseded: new decision for same purpose
-    Active --> Expired: decided_at + retention_days passes
+    Active --> Expired: decided_at + retention_days passes (not implemented yet; status stays active, permits_processing turns false)
 
     note right of Active
         permits_processing =
@@ -198,7 +198,7 @@ flowchart TD
     max -- no --> loop
     max -- yes --> failed["ucm_sync_state = failed<br/>keep retrying every 900s"]
     failed --> loop
-    ok -- "other 4xx" --> paused["paused = true<br/>ucm_sync_state = failed<br/>operator must unpause"]
+    ok -- "any other status (4xx, 202, 3xx)" --> paused["paused = true<br/>ucm_sync_state = failed<br/>operator must unpause"]
 ```
 
 ## Why it's built this way
@@ -282,8 +282,9 @@ first decision; changing it takes a new call.
 codes vs TwiML).
 
 **Approach.** `app/telephony/` isolates verification, parsing and responses
-per provider. The consent service never sees provider details, and every
-inbound request is stored as a `webhook_receipt`. For Twilio that includes the
+per provider. The consent service never sees provider details. Every Twilio request and
+Exotel's `/exotel/decision` are stored as a `webhook_receipt` (Exotel's other
+endpoints don't write one yet; `/status` is tracked in TODOS.md). For Twilio that includes the
 signature, so each consent can be re-verified later.
 
 **Trade-off.** Exotel's unsigned webhooks give a weaker evidence chain. That

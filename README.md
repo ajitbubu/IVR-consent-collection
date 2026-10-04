@@ -15,6 +15,7 @@ consent, call and notice, and prints a DPDP consent receipt.
 | [Reference](#reference) | Look up an endpoint, a webhook, a config variable or a behaviour |
 | [doc/architecture.md](doc/architecture.md) | Understand how it works and why it is built this way (diagrams, design decisions) |
 | [doc/id-privacy-integration.md](doc/id-privacy-integration.md) | Integrate with the ID-PRIVACY® platform and move to MongoDB |
+| [TODOS.md](TODOS.md) | See known follow-up work and deferred QA issues |
 
 ## Shape
 
@@ -38,6 +39,7 @@ Twilio  --POST->  /twilio/voice      (TwiML)             <Gather> wrapping the n
   consent + audit event + outbox row  =  one transaction
   worker  --POST-> UCM /v1/consents   (Idempotency-Key: consent_id)
   console  GET     /api/console/*      read-only operator and DPO screens
+           GET     /v1/consents/{id}/evidence   receipt and evidence panel
 ```
 
 ---
@@ -292,10 +294,10 @@ every 900 s).
 | Method & path | Body / params | Returns |
 |---|---|---|
 | `POST /v1/sessions` | `{direction: ivr_inbound\|ivr_outbound, phone_e164, purpose_key, language="eng", provider="exotel"\|"twilio"}` | 201 `{session_id, custom_field, notice_version_id, provider}`; 400 unknown purpose / no live notice / malformed phone |
-| `GET /v1/consents` | `phone_e164` (any shape) or `data_principal_id` | `{data_principal_id, consents:[{consent_id, purpose_key, status, decision, permits_processing, decided_at, channel, verification_level, expires_at, ucm_sync_state}]}` (current only); 404 unknown |
+| `GET /v1/consents` | `phone_e164` (any shape) or `data_principal_id` | `{data_principal_id, consents:[{consent_id, purpose_key, status, decision, permits_processing, decided_at, channel, verification_level, expires_at, ucm_sync_state}]}` (current only); 400 neither given or malformed phone; 404 unknown |
 | `GET /v1/consents/{id}` | | One consent incl. `is_current`, `superseded_by`, `ucm_consent_ref`; 404 |
 | `GET /v1/consents/{id}/evidence` | | Evidence bundle: consent, principal, notice text + hash, call, artifacts, full hash chain with `verified`; 404 |
-| `POST /v1/consents/withdraw` | query `phone_e164`; body `{purpose_key, channel="agent", reason?}` | 201 `{consent_id, status:"withdrawn"}` |
+| `POST /v1/consents/withdraw` | query `phone_e164`; body `{purpose_key, channel="agent", reason?}` | 201 `{consent_id, status:"withdrawn"}`. **Known gaps:** `channel` and `reason` are accepted but not stored (the withdrawal is recorded as `ivr_inbound`); an unknown phone creates a principal; 400 when the purpose has no live notice |
 | `GET /v1/purposes` | | Purposes with their live notices |
 | `GET /healthz`, `GET /readyz` | | Liveness; readiness + `outbox_lag_seconds` (`degraded` above 3600 s) |
 
@@ -303,7 +305,7 @@ every 900 s).
 
 | Path | Params |
 |---|---|
-| `GET /consents` | `q` (phone in any shape or consent id), `decision`, `status`, `purpose`, `provider`, `sync`, `current_only=true`, `limit≤200`, `offset`. Phones are masked in lists |
+| `GET /consents` | `q` (phone in any shape or consent id; anything else is a partial `LIKE` match on the number), `decision`, `status`, `purpose`, `provider`, `sync`, `current_only=true`, `limit≤200`, `offset`. Phones are masked in lists |
 | `GET /consents/{id}` | Detail with full phone, call, webhooks, history |
 | `GET /stats` | `days≤365` (default 30) |
 | `GET /health` | Queue, lag, failed syncs, unreconciled calls, bad signatures |
@@ -314,25 +316,27 @@ every 900 s).
 
 | Route | From | Responds |
 |---|---|---|
-| `GET /exotel/identify` | Exotel Passthru (async) | 200; creates the session for inbound calls from `?purpose=` and `CallFrom` |
+| `GET /exotel/identify` | Exotel Passthru (async) | 200; creates the session for inbound calls from `?purpose=`, `CallFrom` and optional `?lang=` (notice language, default `eng`). 400 if `CallFrom` is missing or malformed; an unknown `purpose` is an unhandled error (500) |
 | `GET\|HEAD /exotel/notice` | Exotel Greeting | `text/plain` notice of the pinned version |
-| `GET /exotel/decision` | Exotel Passthru (sync) | **200** consent committed; **302** no input, unoffered key, verification required or write failure |
+| `GET /exotel/decision` | Exotel Passthru (sync) | **200** consent committed; **302** no session found, no input, unoffered key, verification required or write failure |
 | `GET\|HEAD /exotel/readback` | Exotel Greeting | Decision and 6-character reference, or "Nothing has changed" |
-| `POST /exotel/status` | StatusCallback | Always 200; stores status, AnsweredBy, queues recording |
-| `POST /twilio/voice` | Twilio (signed) | TwiML `<Gather numDigits=1>` with the notice; spoken hangup if no purpose or withheld caller ID |
+| `POST /exotel/status` | StatusCallback | Always 200; stores status and AnsweredBy; creates a recording placeholder (the URL is not stored and no fetcher exists yet) |
+| `POST /twilio/voice` | Twilio (signed) | TwiML `<Gather numDigits=1>` with the notice; creates the inbound session from `?purpose=` and optional `?lang=`, links this request's receipt to it, and binds an unbound session to `twilio`. Spoken hangup if no purpose or withheld caller ID |
 | `POST /twilio/decision` | `<Gather>` action | `<Redirect>` to readback, or a spoken hangup for silence / bad key / answering machine |
 | `POST /twilio/readback` | Twilio | Spoken decision and reference |
 | `POST /twilio/status` | StatusCallback | 204; older `SequenceNumber` ignored; end time set only by a final status |
-| `POST /twilio/recording` | RecordingStatusCallback | 204; queues the recording |
+| `POST /twilio/recording` | RecordingStatusCallback | 204; creates a recording placeholder (the URL is not stored and no fetcher exists yet) |
 
-Every webhook request is stored as a `webhook_receipt` (Twilio signature
-included), whether or not it was accepted.
+Every Twilio webhook request, and Exotel's `/exotel/decision`, is stored as a
+`webhook_receipt` (Twilio signature included), whether or not it was accepted.
+Exotel's `identify`, `notice`, `readback` and `status` do not write receipts yet
+(the `/status` case is tracked in [TODOS.md](TODOS.md)).
 
 ### Keys and outcomes
 
 | Key | Decision | Status |
 |---|---|---|
-| 1 | `granted` | `active` until `decided_at` + `retention_days` |
+| 1 | `granted` | `active`; `permits_processing` turns false after `decided_at` + `retention_days` (the status itself stays `active`; nothing sets `expired` yet) |
 | 2 | `declined` | `declined` |
 | 9 | `withdrawn` | `withdrawn` |
 

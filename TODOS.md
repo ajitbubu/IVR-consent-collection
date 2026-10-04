@@ -12,7 +12,7 @@
 
 **Cons:** Small. `ingest()` reads the form body, but Exotel can send JSON here, so `read_request` has to return the parsed JSON params for that content type.
 
-**Context:** `app/routes_exotel.py:177-211` parses form/JSON by hand. `app/routes_exotel.py:36-45` duplicates `app/webhook_common.py:80-89`. Raised by /plan-eng-review on 2026-10-01 (finding #8). Start with a test that a status callback writes a receipt.
+**Context:** `app/routes_exotel.py:182-216` parses form/JSON by hand. `app/routes_exotel.py:36-45` duplicates `app/webhook_common.py:84-93`. Raised by /plan-eng-review on 2026-10-01 (finding #8). Start with a test that a status callback writes a receipt.
 
 **Effort:** S
 **Priority:** P3
