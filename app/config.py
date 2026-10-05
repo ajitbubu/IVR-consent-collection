@@ -66,11 +66,18 @@ class Settings:
         default_factory=lambda: _env("PUBLIC_BASE_URL", "http://localhost:8088")
     )
 
+    # Recordings and daily digests. Local filesystem for now; everything goes
+    # through app/storage.py so an object store can replace it later.
+    evidence_dir: str = field(default_factory=lambda: _env("EVIDENCE_DIR", "var/evidence"))
+
     default_provider: str = field(default_factory=lambda: _env("DEFAULT_PROVIDER", "exotel"))
     default_country_code: str = "91"
     outbox_max_attempts: int = 12
     outbox_base_backoff_s: int = 5
     outbox_max_backoff_s: int = 900
+    recording_max_attempts: int = 12
+    # A call younger than this may still be in progress at the provider.
+    reconcile_after_s: int = 300
 
 
 _settings: Settings | None = None

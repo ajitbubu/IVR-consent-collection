@@ -107,6 +107,7 @@ class IvrSession(Base):
     answered_by = Column(Text)
     outcome = Column(Text, nullable=False, default="in_progress")
     reconciled_at = Column(DateTime(timezone=True))
+    reconcile_result = Column(Text)
     provider = Column(Text, nullable=False, default="exotel")
 
 
@@ -121,6 +122,9 @@ class CallArtifact(Base):
     captured_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     purge_after = Column(DateTime(timezone=True), nullable=False)
     purged_at = Column(DateTime(timezone=True))
+    source_url = Column(Text)
+    fetch_attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text)
 
 
 class WebhookReceipt(Base):

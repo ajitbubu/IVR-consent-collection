@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from app.telephony.base import Verification, WebhookEvent
+import httpx
+
+from app.config import settings
+from app.telephony.base import CallDetails, CallLookupUnavailable, Verification, WebhookEvent
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
@@ -89,3 +92,26 @@ def _exotel_answered_by(p: dict) -> str | None:
     if isinstance(legs, list) and len(legs) > 1 and isinstance(legs[1], dict):
         return legs[1].get("AnsweredBy")
     return None
+
+
+def fetch_call_details(call_sid: str) -> CallDetails | None:
+    """The authenticated Call Details API -- the only Exotel source that
+    can be trusted, since its webhooks are unsigned. None means Exotel has
+    no such call."""
+    s = settings()
+    url = f"{s.exotel_base_url}/v1/Accounts/{s.exotel_sid}/Calls/{call_sid}.json"
+    try:
+        resp = httpx.get(url, auth=(s.exotel_api_key, s.exotel_api_token), timeout=10.0)
+    except httpx.HTTPError as exc:
+        raise CallLookupUnavailable(str(exc)) from exc
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        raise CallLookupUnavailable(f"exotel HTTP {resp.status_code}: {resp.text[:200]}")
+    call = resp.json().get("Call") or {}
+    return CallDetails(
+        status=call.get("Status"),
+        from_number=call.get("From"),
+        to_number=call.get("To"),
+        ended_at=parse_exotel_time(call.get("EndTime")),
+    )
