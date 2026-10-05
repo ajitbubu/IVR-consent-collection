@@ -172,6 +172,9 @@ async def decision(request: Request, db: Session = Depends(get_session)) -> Resp
             db, sess, digit=event.digits,
             decided_at=event.occurred_at or dt.datetime.now(dt.timezone.utc),
         )
+        # The request's own commit runs after the response is sent -- too late
+        # to take back a redirect to the confirmation. Commit first.
+        db.commit()
     except UnknownDigit:
         record_no_decision(db, sess, "invalid_key")
         return _hangup("That was not one of the options. Nothing has changed. Goodbye.")
@@ -179,6 +182,7 @@ async def decision(request: Request, db: Session = Depends(get_session)) -> Resp
         record_no_decision(db, sess, "verification_required")
         return _hangup("We need to verify your identity first. Someone will call you back.")
     except Exception as exc:
+        db.rollback()
         log.exception("twilio decision write failed for session=%s: %s", sess.id, exc)
         return _hangup("We could not record your response. Someone will call you back.")
 

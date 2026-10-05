@@ -354,3 +354,27 @@ def test_late_status_callback_does_not_rewind_the_call(db, marketing_purpose, cl
     db.refresh(sess)
     assert sess.call_status == "completed"
     assert sess.ended_at.isoformat().startswith("2026-10-02T14:30:05")
+
+
+def test_failed_commit_never_redirects_to_the_confirmation(db, marketing_purpose, client,
+                                                            monkeypatch):
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.main import create_app
+
+    sid = _session(client)
+
+    def boom(self):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(Session, "commit", boom)
+    r = post_signed(TestClient(create_app(), raise_server_exceptions=False),
+                    f"/twilio/decision?session={sid}",
+                    {"CallSid": "CAtw-commit", "Digits": "1", "AnsweredBy": "human"})
+    monkeypatch.undo()
+
+    assert r.status_code == 200
+    assert "<Redirect>" not in r.text
+    assert "Someone will call you back" in r.text
+    assert db.execute(select(Consent)).scalars().all() == []
