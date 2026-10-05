@@ -3,7 +3,8 @@ outbox worker: `python -m app.jobs`.
 
 Each pass reconciles finished calls, copies queued recordings into our
 storage, purges recordings past retention, anchors yesterday's chain
-digest once. Every step is safe to repeat, so a crash just means the next
+digest once, and refreshes the Sprinklr API token when it is due (only with
+SPRINKLR_API_ENABLED). Every step is safe to repeat, so a crash just means the next
 pass picks up where this one stopped.
 """
 from __future__ import annotations
@@ -15,6 +16,7 @@ import time
 from app.db import session_scope
 from app.evidence import anchor_daily_digest, fetch_pending_recordings, purge_expired_artifacts
 from app.reconcile import reconcile_due
+from app.sprinklr_api import refresh_if_due
 
 log = logging.getLogger("jobs")
 
@@ -27,6 +29,7 @@ def run_once(today: dt.date | None = None) -> dict:
         "purged": purge_expired_artifacts,
         # Yesterday is complete; today's chains are still growing.
         "digest": lambda db: anchor_daily_digest(db, yesterday),
+        "sprinklr_token": refresh_if_due,
     }
     out: dict = {}
     # One transaction per step: a failure in one never rolls back or skips another.

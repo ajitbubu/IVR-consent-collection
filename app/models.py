@@ -191,6 +191,18 @@ class ConsentEvent(Base):
     entry_hash = Column(LargeBinary, nullable=False)
 
 
+class SprinklrOauthToken(Base):
+    """Encrypted at rest with the same envelope encryption as attributes."""
+
+    __tablename__ = "sprinklr_oauth_token"
+    env = Column(Text, primary_key=True)
+    access_token_enc = Column(LargeBinary, nullable=False)
+    refresh_token_enc = Column(LargeBinary, nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+
 class UcmOutbox(Base):
     __tablename__ = "ucm_outbox"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
