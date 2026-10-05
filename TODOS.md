@@ -59,3 +59,21 @@
 **Effort:** S
 **Priority:** P3
 **Depends on:** None
+
+## Sprinklr
+
+### Questions for Sprinklr before going live
+
+**What:** Get answers to these from Sprinklr (support or the success manager), then update the code each one touches.
+
+1. Can IVR HTTP/API nodes send custom headers (`Authorization: Bearer …`), or sign requests with HMAC? This decides whether `SPRINKLR_WEBHOOK_TOKEN` stays or `app/telephony/sprinklr.py` verifies a signature.
+2. How are call recordings accessed, and do recording URLs need auth? `app/evidence.py:download` sends none for Sprinklr today.
+3. Is there an API to look up a call's status, numbers and end time by call ID? `app/sprinklr_api.py:fetch_call_details` is a stub until then, so Sprinklr calls are never reconciled.
+4. Where is the data hosted (DPDP and data residency)? Needed for the provider comparison in the README.
+5. Which environment will the instance be on? Its `sentry-environment` value replaces the `spr-uat` placeholder in `SPRINKLR_ENV`.
+
+Also confirm that the authorize step echoes back the OAuth `state` parameter. Sprinklr's docs don't mention it, and `/sprinklr/oauth/callback` refuses a response without it.
+
+**Context:** Sprinklr app "DSG IVR Consent" on dev.sprinklr.com, created 2026-10-05 under a personal account. Move it to a service account: Sprinklr's own docs recommend one so the keys don't depend on one person. The key won't work until Sprinklr Support activates the app for the instance's environment.
+
+**Priority:** P1 (blocks a live Sprinklr pilot)

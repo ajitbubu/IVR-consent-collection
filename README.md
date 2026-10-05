@@ -19,7 +19,7 @@ consent, call and notice, and prints a DPDP consent receipt.
 
 ## Shape
 
-Two telephony providers behind one interface. The consent state machine does
+Three telephony providers behind one interface. The consent state machine does
 not know which one carried the call.
 
 ```
@@ -35,6 +35,11 @@ Twilio  --POST->  /twilio/voice      (TwiML)             <Gather> wrapping the n
         --POST->  /twilio/status     (StatusCallback)    AnsweredBy, durations
         --POST->  /twilio/recording  (RecordingStatus)   recording ready
         every request signed; unverified = 403, and the receipt is kept
+
+Sprinklr --POST-> /sprinklr/start    (HTTP node, JSON)   session + notice to play
+         --POST-> /sprinklr/decision (HTTP node, JSON)   {committed, outcome, say}
+         --POST-> /sprinklr/status   (HTTP node, JSON)   end of call, recording
+         bearer token on every request; wrong or missing = 401, receipt kept
 
   consent + audit event + outbox row  =  one transaction
   worker  --POST-> UCM /v1/consents   (Idempotency-Key: consent_id)
@@ -118,6 +123,10 @@ uvicorn app.main:app --port 8088
 
 # terminal 3: the outbox worker that delivers to UCM
 python -m app.worker
+
+# optional, terminal 4: evidence jobs (reconciliation, recording fetch,
+# purge, daily digest). Reconciliation needs real provider credentials.
+python -m app.jobs
 ```
 
 Check it is up: `curl -s http://127.0.0.1:8088/readyz` prints
@@ -217,6 +226,125 @@ steps 1–3); `cloudflared` or another HTTPS tunnel.
 **Verify:** a test call shows provider `exotel` and a consent; the decision
 endpoint answers 200.
 
+### How to connect Sprinklr
+
+Sprinklr's IVR flow plays the audio and collects the key itself; HTTP nodes
+in the flow call three JSON endpoints. The flow branches on response fields,
+not status codes.
+
+1. Set `SPRINKLR_WEBHOOK_TOKEN` to a long random secret. Every HTTP node sends
+   `Authorization: Bearer <token>` and `Content-Type: application/json`.
+2. Build the flow:
+   1. **HTTP node** `POST …/sprinklr/start` with
+      `{"call_id", "from", "to", "direction": "inbound"|"outbound", "session_id"?, "purpose"?, "language"?}`.
+      Outbound calls pass the `session_id` from `POST /v1/sessions` (with
+      `"provider": "sprinklr"`); inbound calls pass `purpose` instead.
+      The response is `{"proceed", "session_id", "say", "audio_url"}`. If
+      `proceed` is false, speak `say` and hang up.
+   2. **Play** `audio_url` if it is set, otherwise speak `say` with TTS.
+   3. **Collect one digit** (1 agree, 2 decline, 9 withdraw).
+   4. **HTTP node** `POST …/sprinklr/decision` with
+      `{"session_id", "call_id", "digits", "occurred_at"?}`. Send an empty
+      `digits` on timeout so silence is recorded. The response is
+      `{"committed", "outcome", "say"}`: speak `say`, then hang up.
+   5. At call end, **HTTP node** `POST …/sprinklr/status` with
+      `{"call_id", "session_id"?, "status", "ended_at"?, "recording_url"?}`.
+3. Timestamps are ISO 8601; one without an offset is read as UTC.
+
+**Verify:** a test call shows provider `sprinklr` in the console, the
+decision response has `"committed": true`, and its receipts show `verified`.
+
+#### Test the Sprinklr flow locally, without Sprinklr
+
+These are the requests Sprinklr's HTTP nodes send during a call. Start the
+service with `scripts/run-dev.sh` (HTTPS on port 8088; see
+[Sprinklr OAuth setup](#sprinklr-oauth-setup)), add the `marketing_outreach`
+purpose from [tutorial step 2](#step-2-add-a-purpose-and-its-notice), then in a
+second terminal:
+
+```bash
+set -a; source .env; set +a      # SPRINKLR_WEBHOOK_TOKEN, never echoed
+H=https://localhost:8088; J='content-type: application/json'
+A="Authorization: Bearer $SPRINKLR_WEBHOOK_TOKEN"
+
+curl -sk -X POST $H/sprinklr/start -H "$A" -H "$J" \
+  -d '{"call_id":"spr-demo-1","from":"09876543210","direction":"inbound","purpose":"marketing_outreach"}'; echo
+curl -sk -X POST $H/sprinklr/decision -H "$A" -H "$J" \
+  -d '{"call_id":"spr-demo-1","digits":"1"}'; echo
+curl -sk -o /dev/null -w "%{http_code}\n" -X POST $H/sprinklr/decision \
+  -H 'Authorization: Bearer wrong' -H "$J" -d '{"call_id":"spr-demo-1","digits":"1"}'
+```
+
+You'll see `"proceed":true` with the notice text, then `"committed":true` with
+`You have agreed to marketing calls and messages…`, then `401`. Use a new
+`call_id` for each run: a repeated one returns the first call's decision. `-k`
+accepts the self-signed certificate; with mkcert it isn't needed.
+
+### Sprinklr OAuth setup
+
+This is the other direction: our service calling Sprinklr's REST API, which
+reconciliation will use to look up calls. It uses Sprinklr's OAuth 2.0 code
+grant, as documented on [dev.sprinklr.com](https://dev.sprinklr.com) (Getting
+Started, Refreshing Access Token). You need a developer-portal app *and* a
+user on a Sprinklr instance with the **Generate API Token** permission.
+
+1. Put the app's key and secret in `.env` (gitignored), and set the environment
+   and callback:
+
+   ```bash
+   SPRINKLR_API_KEY=...
+   SPRINKLR_API_SECRET=...
+   SPRINKLR_ENV=spr-uat          # your instance's "sentry-environment", see below
+   SPRINKLR_REDIRECT_URI=https://localhost:8088/sprinklr/oauth/callback
+   ```
+
+   `SPRINKLR_REDIRECT_URI` must match the app's **Callback URL** in the
+   portal exactly, or Sprinklr answers with a 500. To find the environment, sign
+   in to the Sprinklr UI, view the page source and search for
+   `sentry-environment`. Use `prod` for the main production environment; it has
+   no path segment in API URLs. `spr-uat` is a placeholder and is not a
+   documented environment name.
+2. Serve the API over HTTPS on `localhost:8088`, because the registered callback
+   is `https://`. With [mkcert](https://github.com/FiloSottile/mkcert):
+
+   ```bash
+   brew install mkcert && mkcert -install          # trusts a local CA, once
+   mkdir -p var/certs && mkcert -cert-file var/certs/localhost.pem \
+     -key-file var/certs/localhost-key.pem localhost 127.0.0.1
+   uvicorn app.main:app --port 8088 --env-file .env \
+     --ssl-certfile var/certs/localhost.pem --ssl-keyfile var/certs/localhost-key.pem
+   ```
+
+   `var/` is gitignored. Without mkcert, a self-signed certificate from
+   `openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=localhost -addext
+   subjectAltName=DNS:localhost -keyout var/certs/localhost-key.pem -out
+   var/certs/localhost.pem` works too, after you accept the browser warning.
+   The app reads only real environment variables, so pass `--env-file .env` to
+   uvicorn, or run `set -a; source .env; set +a` first for `python -m app.jobs`.
+   `scripts/run-dev.sh` does all of this in one step: it loads `.env`, creates
+   the certificate on first run, creates the schema on an empty database, and
+   serves `https://localhost:8088`. Add `--all` to also start the outbox worker
+   and `app.jobs`, or set `PORT=` to use another port.
+3. Open `https://localhost:8088/sprinklr/oauth/login` in a browser. Sign in to
+   Sprinklr, choose the environments the token may access, and submit.
+4. Sprinklr redirects to `/sprinklr/oauth/callback`. The service checks the
+   `state`, exchanges the code (valid for 10 minutes) for tokens, and stores
+   them encrypted in `sprinklr_oauth_token`. The page shows
+   `{"connected": true, "env": …, "expires_at": …}`, and never the tokens.
+5. Set `SPRINKLR_API_ENABLED=true` once the instance is live. `python -m app.jobs`
+   then refreshes the token once 80% of its lifetime has passed. Sprinklr allows
+   **one token per API key**, so connecting from a second deployment with the
+   same key logs the first one out. Give each deployment its own app.
+
+**Verify:** the callback returns `"connected": true`, and
+`SprinklrClient(db).get("/api/v2/me")` returns your Sprinklr user.
+
+The developer portal says the callback must be publicly accessible. If
+Sprinklr refuses `https://localhost:8088/…`, expose the service through a tunnel
+(for example `cloudflared tunnel --url https://localhost:8088`), then register
+the tunnel's `https://` URL as the Callback URL and set it as
+`SPRINKLR_REDIRECT_URI`.
+
 ### How to place an outbound call
 
 There is no dialler endpoint yet. Create a session, then call the provider
@@ -254,7 +382,7 @@ version they played. Check with `GET /v1/purposes`.
 
 ```bash
 docker run -d --name ivr-qa-pg -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:5435:5432 postgres:16
-PGHOST=127.0.0.1 PGPORT=5435 pytest -q        # 85 tests
+PGHOST=127.0.0.1 PGPORT=5435 pytest -q        # 135 tests
 ```
 
 The fixtures drop and recreate `ivr_consent_test` as the `postgres` superuser
@@ -271,7 +399,8 @@ and shell out to the `psql` client, so `psql` must be on `PATH`
 |---|---|---|
 | `DATABASE_URL` | none (required) | SQLAlchemy URL for Postgres |
 | `PHONE_HMAC_KEY` | `dev-only-not-for-production` | HMAC key for phone lookup hashes. Rotating it requires rehashing every principal. **Must be set in production** |
-| `ATTRIBUTE_KEY` | `dev-only-not-for-production` | Key for name/email at rest (placeholder cipher; KMS in production). **Must be set** |
+| `ATTRIBUTE_KEY` | `dev-only-not-for-production` | Key-encryption key for name/email at rest (AES-256-GCM envelope encryption via `LocalKms`; swap in a real KMS behind `crypto.KmsPort` for production). **Must be set** |
+| `EVIDENCE_DIR` | `var/evidence` | Where `python -m app.jobs` stores recordings and write-once daily digests |
 | `UCM_BASE_URL` | `http://localhost:9999` | ID-PRIVACY® consent API base; the worker POSTs to `/v1/consents` (5 s timeout) |
 | `PUBLIC_BASE_URL` | `http://localhost:8088` | External origin; used to rebuild the URL Twilio signed and for TwiML action URLs |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_CALLER_ID` | `unset` | Twilio live credentials (primary auth token) |
@@ -280,6 +409,12 @@ and shell out to the `psql` client, so `psql` must be on `PATH`
 | `TWILIO_ENFORCE_SIGNATURE` | `true` | Reject unsigned/forged Twilio webhooks (403). Only `false` in a local harness |
 | `EXOTEL_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_CALLER_ID` | `unset` | Exotel credentials |
 | `EXOTEL_BASE_URL` | `https://api.in.exotel.com` | Mumbai cluster; `api.exotel.com` is Singapore |
+| `SPRINKLR_WEBHOOK_TOKEN` | `unset` | Bearer token Sprinklr's HTTP nodes must send. While unset, every Sprinklr request gets a 401 |
+| `SPRINKLR_API_KEY`, `SPRINKLR_API_SECRET` | `unset` | Developer-portal app credentials for calling Sprinklr's API. `/sprinklr/oauth/login` answers 503 while unset |
+| `SPRINKLR_ENV` | `spr-uat` | Instance environment (`prod`, `prod0`, `prod2`, …) from `sentry-environment`; `prod` has no path segment. The default is a placeholder |
+| `SPRINKLR_REDIRECT_URI` | `https://localhost:8088/sprinklr/oauth/callback` | Must equal the app's Callback URL exactly |
+| `SPRINKLR_API_BASE` | `https://api3.sprinklr.com` | Sprinklr API host |
+| `SPRINKLR_API_ENABLED` | `false` | Turns on token refresh in `app.jobs` and the Sprinklr call lookup in reconciliation |
 | `DEFAULT_PROVIDER` | `exotel` | Provider for sessions that don't name one |
 | `CORS_ORIGINS` | empty | Comma-separated origins (dev only, for the Vite server) |
 | `VITE_API_BASE` (UI build) | empty | API origin if the console is served elsewhere |
@@ -287,7 +422,8 @@ and shell out to the `psql` client, so `psql` must be on `PATH`
 
 Fixed in code: country code `91` for numbers without one; outbox backoff
 5 s doubling to 900 s, row marked `failed` after 12 attempts (it keeps retrying
-every 900 s).
+every 900 s). Evidence jobs: a call is reconciled 300 s after it started; a
+recording download is tried 12 times, then left with `last_error` set.
 
 ### Service API (`/v1`)
 
@@ -297,7 +433,7 @@ every 900 s).
 | `GET /v1/consents` | `phone_e164` (any shape) or `data_principal_id` | `{data_principal_id, consents:[{consent_id, purpose_key, status, decision, permits_processing, decided_at, channel, verification_level, expires_at, ucm_sync_state}]}` (current only); 400 neither given or malformed phone; 404 unknown |
 | `GET /v1/consents/{id}` | | One consent incl. `is_current`, `superseded_by`, `ucm_consent_ref`; 404 |
 | `GET /v1/consents/{id}/evidence` | | Evidence bundle: consent, principal, notice text + hash, call, artifacts, full hash chain with `verified`; 404 |
-| `POST /v1/consents/withdraw` | query `phone_e164`; body `{purpose_key, channel="agent", reason?}` | 201 `{consent_id, status:"withdrawn"}`. **Known gaps:** `channel` and `reason` are accepted but not stored (the withdrawal is recorded as `ivr_inbound`); an unknown phone creates a principal; 400 when the purpose has no live notice |
+| `POST /v1/consents/withdraw` | query `phone_e164`; body `{purpose_key, channel="agent", reason?}` | 201 `{consent_id, status:"withdrawn"}`. **Known gaps:** `channel` must be one of `ivr_inbound`, `ivr_outbound`, `web`, `app`, `agent` (422 otherwise) and is stored on the consent; `reason` is accepted but not stored; the session's `provider` is still recorded as `exotel`; an unknown phone creates a principal; 400 when the purpose has no live notice |
 | `GET /v1/purposes` | | Purposes with their live notices |
 | `GET /healthz`, `GET /readyz` | | Liveness; readiness + `outbox_lag_seconds` (`degraded` above 3600 s) |
 
@@ -320,12 +456,17 @@ every 900 s).
 | `GET\|HEAD /exotel/notice` | Exotel Greeting | `text/plain` notice of the pinned version |
 | `GET /exotel/decision` | Exotel Passthru (sync) | **200** consent committed; **302** no session found, no input, unoffered key, verification required or write failure |
 | `GET\|HEAD /exotel/readback` | Exotel Greeting | Decision and 6-character reference, or "Nothing has changed" |
-| `POST /exotel/status` | StatusCallback | Always 200; stores status and AnsweredBy; creates a recording placeholder (the URL is not stored and no fetcher exists yet) |
+| `POST /exotel/status` | StatusCallback | Always 200; stores status and AnsweredBy; queues the recording; `python -m app.jobs` copies it into `EVIDENCE_DIR` and hashes it |
 | `POST /twilio/voice` | Twilio (signed) | TwiML `<Gather numDigits=1>` with the notice; creates the inbound session from `?purpose=` and optional `?lang=`, links this request's receipt to it, and binds an unbound session to `twilio`. Spoken hangup if no purpose or withheld caller ID |
 | `POST /twilio/decision` | `<Gather>` action | `<Redirect>` to readback, or a spoken hangup for silence / bad key / answering machine |
 | `POST /twilio/readback` | Twilio | Spoken decision and reference |
 | `POST /twilio/status` | StatusCallback | 204; older `SequenceNumber` ignored; end time set only by a final status |
-| `POST /twilio/recording` | RecordingStatusCallback | 204; creates a recording placeholder (the URL is not stored and no fetcher exists yet) |
+| `POST /twilio/recording` | RecordingStatusCallback | 204; queues the recording; `python -m app.jobs` downloads it (HTTP Basic) into `EVIDENCE_DIR` and hashes it |
+| `POST /sprinklr/start` | HTTP node, JSON | 200 `{proceed, session_id, say, audio_url}`; creates the session for inbound calls; 401 without the bearer token |
+| `POST /sprinklr/decision` | HTTP node, JSON | 200 `{committed, outcome, say}`; `committed` is true only after the consent is committed; 401 without the token |
+| `POST /sprinklr/status` | HTTP node, JSON | 204; stores status and end time; queues `recording_url` (downloaded without auth) |
+| `GET /sprinklr/oauth/login` | Browser | 302 to Sprinklr's authorize URL with a `state` cookie (10 min); 503 without key/secret |
+| `GET /sprinklr/oauth/callback` | Browser, from Sprinklr | 200 `{connected, env, expires_at}`; 400 on a state mismatch or a Sprinklr error; 502 if the code exchange fails |
 
 Every Twilio webhook request, and Exotel's `/exotel/decision`, is stored as a
 `webhook_receipt` (Twilio signature included), whether or not it was accepted.
@@ -348,7 +489,7 @@ second keypress on the same call keeps the first decision.
 
 ## Tests
 
-`PGHOST=127.0.0.1 PGPORT=5435 pytest -q` runs 85 tests (see
+`PGHOST=127.0.0.1 PGPORT=5435 pytest -q` runs 135 tests (see
 [how to run the tests](#how-to-run-the-tests)). The suite drives simulated
 calls on both providers against a stubbed UCM. Notable cases, because each one
 pins a failure that would otherwise be silent:
@@ -375,12 +516,15 @@ pins a failure that would otherwise be silent:
 
 ## What this does not do yet
 
-No CRM adapter beyond the `CrmPort` interface, no ASR, no dialler endpoint, no
-S3 recording fetcher (the hook is `evidence.queue_recording_fetch`), and no
-authentication on `/v1` or the console (deploy behind the PMP gateway).
-`crypto.encrypt_attribute` is a placeholder with the right interface — replace
-it with KMS envelope encryption before real data touches this. Exotel consents
-are not yet corroborated against the Call Details API. Full list:
+No CRM adapter beyond the `CrmPort` interface, no ASR, no dialler endpoint, and
+no authentication on `/v1` or the console (deploy behind the PMP gateway).
+Evidence storage is the local filesystem (`EVIDENCE_DIR`), not S3 with Object
+Lock, and attribute encryption uses `LocalKms` rather than a cloud KMS. Calls
+are reconciled after they end, so a consent can reach UCM before its call is
+corroborated; a mismatch then only holds consents not yet delivered. Sprinklr
+calls are not reconciled at all: the API client and OAuth are in place, but
+the call-details lookup is a stub until Sprinklr names the endpoint. Sprinklr
+recording URLs are downloaded without authentication. Full list:
 [doc/architecture.md](doc/architecture.md#not-yet-implemented).
 
 ## Choosing a provider
@@ -393,6 +537,10 @@ are not yet corroborated against the Call Details API. Full list:
 | India residency | Mumbai cluster | **No India region at all** |
 | Indian numbers | Local and mobile | Toll-free `+91800` only |
 
+Sprinklr is not in this table because its webhook signing, recording access
+and data residency have not been checked against its docs yet; this service
+authenticates it with a shared bearer token.
+
 Exotel for India, Twilio elsewhere. Twilio's signature is a genuinely
 stronger evidentiary chain, but its own docs decline to guarantee that data
 stays in a selected region, and there is no Indian region to select.
@@ -402,11 +550,11 @@ stays in a selected region, and there is no Indian region to select.
 **Exotel does not sign its webhooks.** No HMAC, no shared secret, nothing.
 The `/exotel/*` routes must be bound to a separate hostname behind an IP
 allowlist, and every consent needs corroborating against the authenticated
-Call Details API before it is trusted. Exotel's source IP ranges are not
+Call Details API — `python -m app.jobs` does this after each call ends. Exotel's source IP ranges are not
 published — request them from `hello@exotel.com`.
 
 **Check which cluster the account is on.** `api.exotel.com` is Singapore and
 is the default for new accounts; `api.in.exotel.com` is Mumbai. Exotel's
 documented recording URLs point at AWS Singapore in every example, so the
-recording fetcher copies audio into our own `ap-south-1` bucket and treats
-Exotel's copy as transient.
+recording fetcher copies audio into our own storage and treats Exotel's copy as
+transient (local filesystem today; an `ap-south-1` bucket in production).

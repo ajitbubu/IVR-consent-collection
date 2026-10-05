@@ -1,6 +1,6 @@
 # IVR Consent Capture: architecture and flows
 
-As built at `99c7b74` (2026-10-03). A caller hears a versioned DPDP notice,
+As built on 2026-10-05. A caller hears a versioned DPDP notice,
 presses a key, and the decision is stored in Postgres as the write-ahead
 record. A separate worker then pushes it to UCM, so a UCM outage can never
 lose a consent.
@@ -14,12 +14,16 @@ MongoDB port): [id-privacy-integration.md](id-privacy-integration.md).
 flowchart LR
     exotel["Exotel (India)<br/>unsigned, IP allowlist"]
     twilio["Twilio (elsewhere)<br/>HMAC-SHA1 signed"]
+    sprinklr["Sprinklr IVR<br/>HTTP nodes, bearer token"]
+    sprapi["Sprinklr REST API<br/>OAuth 2.0 code grant"]
     svc["Internal services"]
     ops["Ops / DPO browser"]
 
     subgraph app["FastAPI app (app/main.py)"]
         rex["routes_exotel.py<br/>/exotel/identify, notice,<br/>decision, readback, status"]
         rtw["routes_twilio.py<br/>/twilio/voice, decision,<br/>readback, status, recording"]
+        rsp["routes_sprinklr.py<br/>/sprinklr/start, decision, status"]
+        roa["routes_sprinklr_oauth.py<br/>/sprinklr/oauth/login, callback"]
         ingest["webhook_common.ingest()<br/>verify, parse, find_session,<br/>write webhook_receipt"]
         api["api.py<br/>/v1/*"]
         console["console_api.py + ui/<br/>/api/console/*, /console"]
@@ -29,16 +33,20 @@ flowchart LR
 
     subgraph pg["Postgres"]
         tx[["One transaction per decision:<br/>consent + consent_event + ucm_outbox"]]
-        tables[("data_principal, ivr_session,<br/>consent, consent_event,<br/>ucm_outbox, webhook_receipt,<br/>call_artifact")]
+        tables[("data_principal, ivr_session,<br/>consent, consent_event,<br/>ucm_outbox, webhook_receipt,<br/>call_artifact, sprinklr_oauth_token")]
     end
 
     worker["app/worker.py<br/>outbox.drain() every 2s"]
+    jobs["app/jobs.py, every 60s<br/>reconcile, fetch recordings,<br/>purge, daily digest, token refresh"]
+    files[("EVIDENCE_DIR<br/>recordings, digests")]
     ucm["UCM<br/>POST /v1/consents<br/>Idempotency-Key: consent_id"]
 
     exotel -- GET --> rex
     twilio -- POST --> rtw
     rex -->|decision only| ingest
     rtw --> ingest
+    sprinklr -- "POST JSON" --> rsp --> ingest
+    ops --> roa --> sprapi
     ingest --> cs
     svc --> api --> cs
     ops --> console --> tables
@@ -47,6 +55,8 @@ flowchart LR
     hc --> tx
     tx --> tables
     tables --> worker --> ucm
+    tables --> jobs --> files
+    jobs -->|call details| exotel & twilio
 ```
 
 | Module | Role |
@@ -57,7 +67,11 @@ flowchart LR
 | `app/consent_service.py` | Consent state machine: sessions, decisions, supersession, outbox row |
 | `app/hashchain.py` | Per-principal append-only hash chain |
 | `app/outbox.py`, `app/worker.py`, `app/ucm.py` | Ordered, retried delivery to UCM |
-| `app/evidence.py` | Recording artifacts, evidence bundle, daily chain digest |
+| `app/evidence.py`, `app/storage.py` | Recording fetch and purge, evidence bundle, daily chain digest written once to storage |
+| `app/routes_sprinklr.py`, `app/telephony/sprinklr.py` | Sprinklr: JSON endpoints for IVR-flow HTTP nodes, shared bearer token |
+| `app/routes_sprinklr_oauth.py`, `app/sprinklr_api.py` | Sprinklr REST API: OAuth login and callback, encrypted token store, refresh, API client, call-lookup stub |
+| `app/crypto.py` | Phone HMAC, canonical JSON, AES-256-GCM envelope encryption behind `KmsPort` |
+| `app/reconcile.py`, `app/jobs.py` | Corroborates finished calls against the provider's call-details API; `python -m app.jobs` runs reconciliation, recording fetch, purge and digest every 60 s |
 | `app/api.py` | Service API (`/v1`) |
 | `app/console_api.py`, `ui/` | Read-only operator and DPO console |
 
@@ -105,7 +119,7 @@ sequenceDiagram
     X-->>C: readback
     C->>X: hangs up
     X->>S: POST /status (delivery not guaranteed)
-    S->>DB: call_status, AnsweredBy, recording placeholder in call_artifact (URL not kept yet)
+    S->>DB: call_status, AnsweredBy, recording queued in call_artifact (source_url)
 ```
 
 ## Call flow: Twilio (outside India)
@@ -139,6 +153,86 @@ sequenceDiagram
     S-->>T: Say "You have agreed to X. Ref ...", Hangup
     T->>S: POST /twilio/status, /twilio/recording (signed)
 ```
+
+## Call flow: Sprinklr
+
+Sprinklr's IVR flow plays the audio and collects the key; its HTTP nodes call
+JSON endpoints whose contract is ours. The flow branches on response fields.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P as Sprinklr IVR flow
+    participant S as IVR service
+    participant DB as Postgres
+
+    P->>S: POST /sprinklr/start {call_id, from, session_id or purpose} + Bearer token
+    S->>DB: webhook_receipt (always, even if rejected)
+    alt missing or wrong token
+        S-->>P: 401
+    else no session and no purpose, or withheld caller id
+        S-->>P: {proceed:false, say}
+    else
+        S->>DB: create or bind session, notice.served
+        S-->>P: {proceed:true, session_id, say: notice, audio_url}
+    end
+    P->>S: POST /sprinklr/decision {session_id or call_id, digits}
+    alt empty digits / unoffered key
+        S->>DB: session.no_decision
+        S-->>P: {committed:false, outcome, say}
+    else key 1, 2 or 9
+        S->>DB: record_decision(), then COMMIT before answering
+        S-->>P: {committed:true, outcome, say: readback}
+    end
+    P->>S: POST /sprinklr/status {call_id, status, ended_at, recording_url}
+    S->>DB: call_status, ended_at, recording queued
+```
+
+`committed:true` is only sent after the commit succeeds. FastAPI runs the
+request's own commit after the response has left, so every decision endpoint
+(Exotel, Twilio, Sprinklr) commits explicitly first.
+
+## Sprinklr REST API (OAuth 2.0)
+
+The other direction: this service calling Sprinklr. URLs are from
+dev.sprinklr.com: `https://api3.sprinklr.com/{env}/oauth/authorize|token`,
+where `prod` has no `{env}` segment.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Operator browser
+    participant S as IVR service
+    participant SP as Sprinklr
+
+    B->>S: GET /sprinklr/oauth/login
+    S-->>B: 302 to SP authorize?client_id&redirect_uri&response_type=code&state + state cookie
+    B->>SP: sign in, choose environments
+    SP-->>B: 302 to /sprinklr/oauth/callback?code&state
+    B->>S: GET /sprinklr/oauth/callback
+    S->>S: state == cookie? (else 400)
+    S->>SP: POST oauth/token (code, secret in the body)
+    SP-->>S: access_token, refresh_token, expires_in
+    S->>S: store both encrypted in sprinklr_oauth_token
+    Note over S,SP: app.jobs refreshes after 80% of the lifetime, under a row lock
+```
+
+Sprinklr allows one token per API key, and each refresh token works once. Two
+processes refreshing at the same time would invalidate each other, so the
+refresh runs under a row lock; a second deployment needs its own app.
+
+## Evidence jobs
+
+`python -m app.jobs` runs five steps every 60 s, each in its own transaction,
+so one failing never stops the others:
+
+| Step | What it does |
+|---|---|
+| reconcile | For each call older than 5 min, asks the provider's call-details API. Records `call.reconciled` in the chain; on `not_found`, `number_mismatch` or `not_connected`, pauses the consent's undelivered outbox row |
+| recordings | Downloads queued recordings into `EVIDENCE_DIR`, hashes them; 12 attempts |
+| purge | Deletes recordings past retention, keeping the row and hash |
+| digest | Writes yesterday's chain digest once, as a read-only file |
+| sprinklr_token | Refreshes the Sprinklr token when due (only with `SPRINKLR_API_ENABLED`) |
 
 ## Consent state machine (per principal + purpose)
 
@@ -260,7 +354,9 @@ zone (`test_hash_is_timezone_independent`).
 
 **Trade-off.** Chains prove internal consistency only. Tamper-evidence
 against someone with database write access needs the daily digest anchored to
-write-once storage, which is not running yet ([below](#not-yet-implemented)).
+write-once storage. `python -m app.jobs` writes each day's digest once, as a
+read-only file under `EVIDENCE_DIR/digests/`; a local file is not real WORM
+storage ([below](#not-yet-implemented)).
 
 ### Silence is never consent, and replays are no-ops
 
@@ -275,11 +371,11 @@ makes a replayed webhook return the original consent.
 **Trade-off.** A caller who presses another key on the same call keeps their
 first decision; changing it takes a new call.
 
-### Two providers, one state machine
+### Three providers, one state machine
 
-**Problem.** Exotel and Twilio differ in everything at the edge: signing
-(none vs HMAC), digit encoding (quoted vs plain), response format (status
-codes vs TwiML).
+**Problem.** Exotel, Twilio and Sprinklr differ in everything at the edge:
+authentication (none, HMAC, bearer token), digit encoding (quoted, plain,
+JSON), response format (status codes, TwiML, JSON fields).
 
 **Approach.** `app/telephony/` isolates verification, parsing and responses
 per provider. The consent service never sees provider details. Every Twilio request and
@@ -289,14 +385,18 @@ signature, so each consent can be re-verified later.
 
 **Trade-off.** Exotel's unsigned webhooks give a weaker evidence chain. That
 is why its routes need an IP allowlist and Call Details corroboration (see the
-README's *Two things to know before deploying*).
+README's *Two things to know before deploying*). Sprinklr's shared token
+authenticates each request, but unlike Twilio's signature it can't be
+re-verified afterwards, so it is never stored.
 
 ## Not yet implemented
 
 Comments in the code describe these controls, but no code enforces them yet:
 
-- **Exotel corroboration.** Nothing checks an Exotel consent against the Call Details API before it goes to UCM. The only protection today is the IP allowlist at the edge.
+- **Corroboration before UCM.** `app/reconcile.py` checks each call against the provider's call-details API, but only after the call ends. A consent can reach UCM first; a mismatch then holds it only if it has not been delivered yet.
 - **`/v1` and console authentication.** mTLS and the separate hostnames are expected at deployment; the app itself performs no auth check.
-- **Daily digest anchoring.** `daily_digest()` exists, but nothing schedules it or writes the result to WORM storage.
+- **WORM storage.** Daily digests and recordings go to the local filesystem (`EVIDENCE_DIR`). Production needs S3 in `ap-south-1` with Object Lock behind `app/storage.py`.
+- **Cloud KMS.** Attribute encryption is AES-256-GCM envelope encryption, but the key-encryption key comes from `ATTRIBUTE_KEY` through `LocalKms`. Production needs a KMS client behind `crypto.KmsPort`.
 - **Append-only audit tables.** The database doesn't enforce append-only on `consent_event` and `webhook_receipt`.
+- **Sprinklr call lookup.** `sprinklr_api.fetch_call_details` is a stub until Sprinklr names a call-details endpoint, so Sprinklr calls are never reconciled. Open questions are marked `TODO(sprinklr)` in the code and listed in TODOS.md.
 - **Outbox ordering under retries.** `claim_batch` filters out rows that aren't due before it picks each principal's oldest row. So a grant waiting to retry can be overtaken by a later withdrawal.
