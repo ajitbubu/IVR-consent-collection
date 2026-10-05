@@ -76,6 +76,27 @@ class Settings:
         default_factory=lambda: _env("SPRINKLR_WEBHOOK_TOKEN", "unset")
     )
 
+    # Sprinklr REST API (OAuth 2.0 code grant), for calls from us to Sprinklr.
+    # The environment is the instance's "sentry-environment" (prod, prod0,
+    # prod2, ...); "prod" has no path segment in API URLs.
+    sprinklr_api_key: str = field(default_factory=lambda: _env("SPRINKLR_API_KEY", "unset"))
+    sprinklr_api_secret: str = field(default_factory=lambda: _env("SPRINKLR_API_SECRET", "unset"))
+    # TODO(sprinklr): "spr-uat" is a placeholder, not a documented environment.
+    # Replace it with the instance's sentry-environment once there is one.
+    sprinklr_env: str = field(default_factory=lambda: _env("SPRINKLR_ENV", "spr-uat"))
+    sprinklr_redirect_uri: str = field(
+        default_factory=lambda: _env(
+            "SPRINKLR_REDIRECT_URI", "https://localhost:8088/sprinklr/oauth/callback")
+    )
+    sprinklr_api_base: str = field(
+        default_factory=lambda: _env("SPRINKLR_API_BASE", "https://api3.sprinklr.com")
+    )
+    # Off until there is a live instance: gates token refresh in app.jobs and
+    # the call-details lookup used by reconciliation.
+    sprinklr_api_enabled: bool = field(
+        default_factory=lambda: _env("SPRINKLR_API_ENABLED", "false").lower() == "true"
+    )
+
     default_provider: str = field(default_factory=lambda: _env("DEFAULT_PROVIDER", "exotel"))
     default_country_code: str = "91"
     outbox_max_attempts: int = 12
