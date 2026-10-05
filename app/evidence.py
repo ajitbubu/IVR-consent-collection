@@ -74,7 +74,11 @@ Fetcher = Callable[[str, str], bytes]
 
 def download(url: str, provider: str) -> bytes:
     """Twilio enforces HTTP Basic auth on media URLs; Exotel's links are
-    served as-is."""
+    served as-is.
+
+    TODO(sprinklr): how are Sprinklr call recordings accessed, and do their
+    URLs need auth? Sprinklr recordings are fetched with none until then.
+    """
     auth = None
     if provider == "twilio":
         s = settings()

@@ -8,6 +8,9 @@ Authentication is a shared bearer token in the Authorization header, the
 most an HTTP node can be relied on to send. It proves the request came from
 something holding the token, but unlike Twilio's per-request signature it
 cannot be re-verified later, so the token itself is never stored.
+
+TODO(sprinklr): where is Sprinklr Voice data hosted, and can it stay in
+India? Needed for the DPDP residency column in the README's provider table.
 """
 from __future__ import annotations
 
@@ -48,6 +51,9 @@ class SprinklrProvider:
         return self._token or settings().sprinklr_webhook_token
 
     def verify(self, *, url: str, headers: dict, form: dict, body: bytes) -> Verification:
+        # TODO(sprinklr): confirm IVR HTTP nodes can send a custom
+        # Authorization header. If they can HMAC-sign the body instead, verify
+        # that here and store the signature on the receipt, as Twilio does.
         token = self.token
         if not token or token == "unset":
             return Verification(ok=False, signature=None, reason="no webhook token configured")

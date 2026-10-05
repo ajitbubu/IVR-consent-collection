@@ -21,6 +21,7 @@ from app.config import settings
 from app.hashchain import append_event
 from app.identity import PhoneNormalisationError, normalise_e164
 from app.models import Consent, DataPrincipal, IvrSession, UcmOutbox
+from app import sprinklr_api
 from app.telephony import exotel, twilio
 from app.telephony.base import CallDetails, CallLookupUnavailable
 
@@ -35,6 +36,12 @@ LOOKUPS: dict[str, Lookup] = {
 
 # Not finished yet at the provider: look again on a later pass.
 _IN_PROGRESS = {"queued", "initiated", "ringing", "in-progress"}
+
+
+def _lookups() -> dict[str, Lookup]:
+    if settings().sprinklr_api_enabled:
+        return {**LOOKUPS, "sprinklr": sprinklr_api.fetch_call_details}
+    return LOOKUPS
 
 
 def _now() -> dt.datetime:
@@ -80,7 +87,7 @@ def _hold(db: Session, consent: Consent, result: str) -> None:
 def reconcile_due(
     db: Session, lookups: dict[str, Lookup] | None = None, limit: int = 50
 ) -> dict[str, int]:
-    lookups = lookups if lookups is not None else LOOKUPS
+    lookups = lookups if lookups is not None else _lookups()
     cutoff = _now() - dt.timedelta(seconds=settings().reconcile_after_s)
     sessions = list(
         db.execute(

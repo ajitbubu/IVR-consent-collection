@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.crypto import decrypt_attribute, encrypt_attribute
 from app.models import SprinklrOauthToken
+from app.telephony.base import CallDetails, CallLookupUnavailable
 
 log = logging.getLogger("sprinklr_api")
 
@@ -174,3 +175,14 @@ class SprinklrClient:
             timeout=15.0,
         )
 
+
+def fetch_call_details(call_id: str) -> CallDetails | None:
+    """Reconciliation lookup for Sprinklr calls. Used only when
+    SPRINKLR_API_ENABLED is true.
+
+    TODO(sprinklr): Sprinklr's developer docs do not document a "get call by
+    id" endpoint for Voice. Ask Sprinklr which API returns a call's status,
+    numbers and end time by call id, then implement it with SprinklrClient.
+    Until then every Sprinklr call is deferred, never judged.
+    """
+    raise CallLookupUnavailable("sprinklr call-details endpoint not implemented yet")
