@@ -7,13 +7,15 @@ from app.telephony.base import (
     register,
 )
 from app.telephony.exotel import ExotelProvider
+from app.telephony.sprinklr import SprinklrProvider
 from app.telephony.twilio import TwilioProvider
 
 register(ExotelProvider())
 register(TwilioProvider())
+register(SprinklrProvider())
 
 __all__ = [
     "TelephonyProvider", "Verification", "WebhookEvent",
-    "ExotelProvider", "TwilioProvider",
+    "ExotelProvider", "TwilioProvider", "SprinklrProvider",
     "get", "names", "register",
 ]

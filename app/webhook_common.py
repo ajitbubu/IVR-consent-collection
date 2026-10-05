@@ -3,6 +3,7 @@ receipt recording, session lookup."""
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 
 from fastapi import Request
@@ -36,7 +37,11 @@ async def read_request(request: Request) -> tuple[dict, bytes]:
     body = await request.body()
     ctype = request.headers.get("content-type", "")
     if ctype.startswith("application/json"):
-        return {}, body
+        try:
+            parsed = json.loads(body or b"{}")
+        except ValueError:
+            return {}, body
+        return (parsed if isinstance(parsed, dict) else {}), body
     if ctype.startswith("application/x-www-form-urlencoded") or ctype.startswith("multipart/"):
         form = await request.form()
         return {k: str(v) for k, v in form.items()}, body

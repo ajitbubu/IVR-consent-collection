@@ -70,6 +70,12 @@ class Settings:
     # through app/storage.py so an object store can replace it later.
     evidence_dir: str = field(default_factory=lambda: _env("EVIDENCE_DIR", "var/evidence"))
 
+    # Sprinklr's IVR HTTP nodes send this as "Authorization: Bearer <token>".
+    # Unset means every Sprinklr request is rejected.
+    sprinklr_webhook_token: str = field(
+        default_factory=lambda: _env("SPRINKLR_WEBHOOK_TOKEN", "unset")
+    )
+
     default_provider: str = field(default_factory=lambda: _env("DEFAULT_PROVIDER", "exotel"))
     default_country_code: str = "91"
     outbox_max_attempts: int = 12

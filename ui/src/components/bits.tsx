@@ -14,7 +14,8 @@ export function SyncPill({ state }: { state: string }) {
   return <Pill kind={kind}>{state}</Pill>
 }
 
-/** Twilio signs every webhook; Exotel signs none. Showing which provider
+/** Twilio signs every webhook, Sprinklr sends a shared token, Exotel sends
+ *  nothing. Showing which provider
  *  carried a consent is not decoration -- it tells an operator how much the
  *  transport itself proves. */
 export function ProviderPill({ provider }: { provider: string }) {

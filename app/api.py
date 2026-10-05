@@ -28,7 +28,7 @@ class SessionCreate(BaseModel):
     phone_e164: str
     purpose_key: str
     language: str = "eng"
-    provider: str = Field(default="exotel", pattern="^(exotel|twilio)$")
+    provider: str = Field(default="exotel", pattern="^(exotel|twilio|sprinklr)$")
 
 
 class SessionCreated(BaseModel):

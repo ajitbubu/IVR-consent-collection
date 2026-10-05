@@ -13,6 +13,7 @@ os.environ.setdefault("TWILIO_ACCOUNT_SID", "ACtest")
 os.environ.setdefault("TWILIO_AUTH_TOKEN", "test-auth-token")
 os.environ.setdefault("PUBLIC_BASE_URL", "https://consent.test")
 os.environ.setdefault("TWILIO_ENFORCE_SIGNATURE", "true")
+os.environ.setdefault("SPRINKLR_WEBHOOK_TOKEN", "test-sprinklr-token")
 
 TEST_DB = os.environ.get("TEST_DB", "ivr_consent_test")
 PGHOST = os.environ.get("PGHOST", "/tmp")

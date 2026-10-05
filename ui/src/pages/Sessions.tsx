@@ -20,6 +20,7 @@ export default function Sessions() {
           <option value="">Any provider</option>
           <option value="exotel">Exotel</option>
           <option value="twilio">Twilio</option>
+          <option value="sprinklr">Sprinklr</option>
         </select>
         <select value={outcome} onChange={(e) => setOutcome(e.target.value)} aria-label="Outcome">
           <option value="">Any outcome</option>
