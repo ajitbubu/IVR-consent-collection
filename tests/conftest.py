@@ -48,7 +48,8 @@ def db(database):
     # Clean slate per test.
     s.execute(text(
         "TRUNCATE webhook_receipt, ucm_outbox, consent_event, consent, call_artifact, "
-        "ivr_session, identity_attribute, notice_version, purpose, data_principal "
+        "ivr_session, identity_attribute, notice_version, purpose, data_principal, "
+        "sprinklr_oauth_token "
         "RESTART IDENTITY CASCADE"
     ))
     s.commit()
