@@ -238,3 +238,52 @@ def test_access_log_redacts_the_authorization_code():
     for f in logging.getLogger("uvicorn.access").filters:
         f.filter(record)
     assert "abc" not in record.getMessage()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_commit_failure_reports_disconnected_and_rolls_back(
+    db, spr, https_client, monkeypatch, caplog, existing
+):
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.orm import Session
+    from app.crypto import decrypt_attribute
+    from app.db import session_factory
+
+    if existing:
+        _seed(db, monkeypatch, age_fraction=0.1)
+    fake = FakeTokenEndpoint(tokens=("new-access-secret", "new-refresh-secret"))
+    monkeypatch.setattr(sprinklr_api.httpx, "post", fake)
+    state, _ = _login(https_client)
+    original_commit = Session.commit
+    original_rollback = Session.rollback
+    failed, rolled_back = [], []
+
+    def fail_token_commit(session):
+        # exchange_code has already flushed; fail only its active transaction.
+        if session.in_transaction() and not failed:
+            failed.append(True)
+            raise OperationalError("token SQL", {}, Exception("new-access-secret"))
+        return original_commit(session)
+
+    def track_rollback(session):
+        rolled_back.append(True)
+        return original_rollback(session)
+
+    monkeypatch.setattr(Session, "commit", fail_token_commit)
+    monkeypatch.setattr(Session, "rollback", track_rollback)
+    with caplog.at_level(logging.ERROR):
+        response = https_client.get("/sprinklr/oauth/callback",
+                                    params={"code": "single-use-code", "state": state})
+    assert response.status_code == 503
+    assert response.json()["connected"] is False
+    assert "/sprinklr/oauth/login" in response.json()["detail"]
+    assert failed and rolled_back and len(fake.calls) == 1
+    assert "sprinklr_oauth_state" not in https_client.cookies
+    assert "new-access-secret" not in response.text + caplog.text
+    with session_factory()() as independent:
+        row = independent.execute(select(SprinklrOauthToken)).scalar_one_or_none()
+        if existing:
+            assert decrypt_attribute(row.access_token_enc) == "access-1"
+            assert decrypt_attribute(row.refresh_token_enc) == "refresh-1"
+        else:
+            assert row is None
