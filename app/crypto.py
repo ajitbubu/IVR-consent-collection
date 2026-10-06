@@ -57,26 +57,64 @@ class LocalKms:
 
 
 _NONCE = 12
-_VERSION = b"\x01"
-_WRAPPED_LEN = _NONCE + 32 + 16  # nonce + data key + GCM tag (LocalKms)
+_V1 = b"\x01"
+_VERSION = b"\x02"
+_WRAPPED_LEN = _NONCE + 32 + 16  # historical v1 LocalKms only
+_LENGTH_BYTES = 4
 
 
 def encrypt_attribute(plaintext: str, kms: KmsPort | None = None) -> bytes:
-    """version | wrapped data key | nonce | ciphertext+tag."""
+    """v2: version | uint32 wrapped-key length | wrapped key | nonce | body.
+
+    The header is authenticated as AAD; wrapped keys remain opaque to callers.
+    """
     kms = kms or LocalKms()
     data_key = AESGCM.generate_key(bit_length=256)
     wrapped = kms.wrap(data_key)
+    if not wrapped:
+        raise ValueError("empty wrapped data key")
+    header = _VERSION + len(wrapped).to_bytes(_LENGTH_BYTES, "big")
     nonce = os.urandom(_NONCE)
-    body = AESGCM(data_key).encrypt(nonce, plaintext.encode(), _VERSION)
-    return _VERSION + wrapped + nonce + body
+    body = AESGCM(data_key).encrypt(nonce, plaintext.encode(), header)
+    return header + wrapped + nonce + body
 
 
 def decrypt_attribute(blob: bytes, kms: KmsPort | None = None) -> str:
-    """Raises cryptography.exceptions.InvalidTag if anything was altered."""
-    if blob[:1] != _VERSION:
-        raise ValueError("unknown attribute encryption version")
+    """Read v1/v2 only. Never fall back to unauthenticated legacy decoding.
+
+    Unversioned XOR rows must be explicitly migrated with their original key;
+    their random nonce can start with any version byte.
+    """
+    if blob[:1] == _V1:
+        offset, wrapped_len, aad = 1, _WRAPPED_LEN, _V1
+    elif blob[:1] == _VERSION:
+        if len(blob) < 1 + _LENGTH_BYTES:
+            raise ValueError("truncated attribute header")
+        offset = 1 + _LENGTH_BYTES
+        wrapped_len = int.from_bytes(blob[1:offset], "big")
+        aad = blob[:offset]
+    else:
+        raise ValueError("unknown attribute encryption version; migrate legacy rows explicitly")
+    if wrapped_len == 0 or len(blob) < offset + wrapped_len + _NONCE + 16:
+        raise ValueError("invalid attribute envelope length")
     kms = kms or LocalKms()
-    wrapped = blob[1:1 + _WRAPPED_LEN]
-    nonce = blob[1 + _WRAPPED_LEN:1 + _WRAPPED_LEN + _NONCE]
-    body = blob[1 + _WRAPPED_LEN + _NONCE:]
-    return AESGCM(kms.unwrap(wrapped)).decrypt(nonce, body, _VERSION).decode()
+    end = offset + wrapped_len
+    wrapped, nonce, body = blob[offset:end], blob[end:end + _NONCE], blob[end + _NONCE:]
+    return AESGCM(kms.unwrap(wrapped)).decrypt(nonce, body, aad).decode()
+
+
+def decrypt_legacy_attribute(blob: bytes, key: bytes) -> str:
+    """Migration-only decoder for the original nonce(16) + XOR format.
+
+    This format has no authentication or reliable discriminator. Call only for
+    rows independently identified as legacy, never after an AES read failure.
+    """
+    if len(blob) < 16:
+        raise ValueError("truncated legacy attribute")
+    nonce, body = blob[:16], blob[16:]
+    stream = bytearray()
+    counter = 0
+    while len(stream) < len(body):
+        stream.extend(sha256(key + nonce + counter.to_bytes(4, "big")))
+        counter += 1
+    return bytes(a ^ b for a, b in zip(body, stream)).decode()

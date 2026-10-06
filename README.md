@@ -559,3 +559,48 @@ is the default for new accounts; `api.in.exotel.com` is Mumbai. Exotel's
 documented recording URLs point at AWS Singapore in every example, so the
 recording fetcher copies audio into our own storage and treats Exotel's copy as
 transient (local filesystem today; an `ap-south-1` bucket in production).
+
+### Post-merge encryption remediation / rollout
+
+New writes use authenticated v2 envelopes containing a four-byte wrapped-key
+length. Reads retain the merged PR's fixed-length **v1 LocalKms** format.
+Production KMS envelopes may have arbitrary lengths in v2; historical v1
+ciphertexts written by a different KMS need that provider's known framing and
+an explicit migration. Key/provider routing and rotation are still deployment
+responsibilities; do not replace the LocalKms key before migrating its data.
+
+The original XOR format is unversioned and unauthenticated. Its random nonce
+can begin with `01` or `02`, so automatic format detection or fallback after
+an authentication failure is unsafe. **Before resuming consent traffic for
+legacy principals**, migrate every legacy identity attribute (including
+superseded rows) using independently verified IDs from a pre-envelope backup
+or reliable write provenance. Never select rows by their first byte or by a
+failed decryption. Back up the current database and pause identity writes.
+
+Prepare `legacy-manifest.json` as an object mapping each confirmed legacy row
+ID to the SHA-256 hex digest of its original `value_enc` bytes. Provide the
+original XOR `ATTRIBUTE_KEY` as `LEGACY_ATTRIBUTE_KEY` through your secret
+manager; the current `ATTRIBUTE_KEY` encrypts the replacements. Run:
+
+```sh
+python -m app.migrate_legacy_attributes legacy-manifest.json
+python -m app.migrate_legacy_attributes legacy-manifest.json --apply
+```
+
+The default is a rollback-only dry run. Apply locks rows, checks every original
+ciphertext digest, verifies new encrypted values, and commits the entire batch
+atomically. A stale/missing row or decoding failure aborts the batch; the same
+manifest cannot accidentally migrate already replaced rows. No plaintext or
+keys are printed. The old format cannot detect a wrong key that happens to
+produce valid UTF-8: validate values against trusted source data before apply.
+If provenance or the original key is unavailable, recover from a trusted
+backup/CRM rather than guessing. A code rollback to PR #2 cannot read v2;
+coordinate deployment and retain backups rather than rolling back blindly.
+
+Sprinklr OAuth now commits tokens before returning `connected: true`. A database
+failure rolls back, returns a generic 503 with `connected: false`, clears the
+consumed attempt's cookie, and directs the operator to restart login. The code
+is single-use; it cannot safely be retried. A lost connection during commit
+can have an uncertain server-side outcome, so verify connection state and
+restart authorization. Live Sprinklr activation and production KMS checks
+remain required; mocked tests do not establish provider interoperability.

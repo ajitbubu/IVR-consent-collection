@@ -14,6 +14,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -84,9 +85,16 @@ def callback(
 
     try:
         row = exchange_code(db, code)
+        db.commit()
     except SprinklrAuthError as exc:
+        db.rollback()
         log.warning("sprinklr code exchange failed: %s", exc)
         return _error(502, str(exc))
+    except SQLAlchemyError:
+        db.rollback()
+        # Database exceptions can include encrypted tokens / query parameters.
+        log.error("sprinklr token persistence failed")
+        return _error(503, "token persistence failed: start again at /sprinklr/oauth/login")
 
     resp = JSONResponse({
         "connected": True,

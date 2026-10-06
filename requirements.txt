@@ -7,3 +7,4 @@ cryptography>=43
 pydantic>=2.7
 python-ulid>=2.2
 pytest>=8.0
+python-multipart>=0.0.18
