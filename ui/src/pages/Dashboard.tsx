@@ -119,7 +119,9 @@ export default function Dashboard() {
                   <td className="muted">
                     {name === 'twilio'
                       ? 'Signed per request; verifiable after the fact'
-                      : 'Unsigned; IP allowlist plus call-detail corroboration'}
+                      : name === 'sprinklr'
+                        ? 'Shared bearer token; not verifiable after the fact'
+                        : 'Unsigned; IP allowlist plus call-detail corroboration'}
                   </td>
                 </tr>
               ))}

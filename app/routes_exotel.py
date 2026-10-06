@@ -126,6 +126,9 @@ def decision(request: Request, db: Session = Depends(get_session)) -> Response:
 
     try:
         result = record_decision(db, sess, digit=digit, decided_at=decided_at)
+        # The request's own commit runs after the response is sent -- too late
+        # to turn a 200 into a 302. Commit here, before promising anything.
+        db.commit()
     except UnknownDigit:
         record_no_decision(db, sess, "invalid_key")
         return Response(status_code=302)
@@ -133,6 +136,7 @@ def decision(request: Request, db: Session = Depends(get_session)) -> Response:
         record_no_decision(db, sess, "verification_required")
         return Response(status_code=302)
     except Exception as exc:
+        db.rollback()
         log.exception("decision write failed for session=%s: %s", sess.id, exc)
         return Response(status_code=302)
 

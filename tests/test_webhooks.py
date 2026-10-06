@@ -209,3 +209,39 @@ def test_malformed_phone_is_rejected_not_a_server_error(db, marketing_purpose, c
     assert db.execute(
         select(IvrSession).where(IvrSession.call_sid == "cs-withheld")
     ).scalar_one_or_none() is None
+
+
+def test_failed_commit_answers_302_not_200(db, marketing_purpose, client, monkeypatch):
+    """The request's own commit runs after the response has gone out, so a
+    200 must not be sent until the consent is actually committed."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import Session
+
+    from app.main import create_app
+
+    s = _create_session(client)
+    params = {"CustomField": s["session_id"], "CallSid": "cs-commit", "CallFrom": "09876543210"}
+
+    def boom(self):
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(Session, "commit", boom)
+    r = TestClient(create_app(), raise_server_exceptions=False).get(
+        "/exotel/decision", params={**params, "digits": '"1"'})
+    monkeypatch.undo()
+
+    assert r.status_code == 302
+    assert db.execute(select(Consent)).scalars().all() == []
+
+
+def test_withdrawal_keeps_the_channel_it_came_from(db, marketing_purpose, client):
+    r = client.post("/v1/consents/withdraw", params={"phone_e164": "9876543210"},
+                    json={"purpose_key": "marketing_outreach", "channel": "agent"})
+    assert r.status_code == 201, r.text
+    assert db.get(Consent, r.json()["consent_id"]).channel == "agent"
+
+
+def test_withdrawal_rejects_an_unknown_channel(db, marketing_purpose, client):
+    r = client.post("/v1/consents/withdraw", params={"phone_e164": "9876543210"},
+                    json={"purpose_key": "marketing_outreach", "channel": "carrier-pigeon"})
+    assert r.status_code == 422

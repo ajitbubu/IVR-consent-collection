@@ -17,8 +17,10 @@ import hmac
 from urllib.parse import urlparse, urlunparse
 from xml.sax.saxutils import escape
 
+import httpx
+
 from app.config import settings
-from app.telephony.base import Verification, WebhookEvent
+from app.telephony.base import CallDetails, CallLookupUnavailable, Verification, WebhookEvent
 
 
 def compute_signature(auth_token: str, url: str, params: dict[str, str] | None) -> str:
@@ -186,3 +188,25 @@ def _parse_rfc2822(raw: str | None) -> dt.datetime | None:
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=dt.timezone.utc)
     return ts
+
+
+def fetch_call_details(call_sid: str) -> CallDetails | None:
+    """Twilio's Call resource. None means Twilio has no such call."""
+    s = settings()
+    url = f"{s.twilio_api_base}/2010-04-01/Accounts/{s.twilio_account_sid}/Calls/{call_sid}.json"
+    try:
+        resp = httpx.get(url, auth=(s.twilio_account_sid, s.twilio_auth_token), timeout=10.0)
+    except httpx.HTTPError as exc:
+        raise CallLookupUnavailable(str(exc)) from exc
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        raise CallLookupUnavailable(f"twilio HTTP {resp.status_code}: {resp.text[:200]}")
+    call = resp.json()
+    return CallDetails(
+        status=call.get("status"),
+        from_number=call.get("from"),
+        to_number=call.get("to"),
+        answered_by=call.get("answered_by"),
+        ended_at=_parse_rfc2822(call.get("end_time")),
+    )

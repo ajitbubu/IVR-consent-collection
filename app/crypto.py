@@ -1,8 +1,9 @@
 """Hashing, HMAC lookup keys, and attribute encryption at rest.
 
-The encryption here is a stand-in with the right shape: a real deployment
-uses a KMS data key per record rather than a single key from the environment.
-The interface is what matters -- swapping the backend should not touch callers.
+Attributes use envelope encryption: every value gets its own AES-256-GCM data
+key, and only the wrapped data key is stored next to the ciphertext. The key
+that wraps it lives behind KmsPort -- LocalKms derives it from ATTRIBUTE_KEY
+for development; production swaps in a real KMS without touching callers.
 """
 from __future__ import annotations
 
@@ -10,7 +11,9 @@ import hashlib
 import hmac
 import json
 import os
-from typing import Any
+from typing import Any, Protocol
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.config import settings
 
@@ -30,26 +33,50 @@ def canonical_json(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
 
 
-def encrypt_attribute(plaintext: str) -> bytes:
-    """XOR-with-keystream placeholder. Shape is right, strength is not --
-    replace with KMS envelope encryption before this touches real data."""
-    nonce = os.urandom(16)
-    stream = _keystream(nonce, len(plaintext.encode()))
-    body = bytes(a ^ b for a, b in zip(plaintext.encode(), stream))
-    return nonce + body
+class KmsPort(Protocol):
+    """Wraps and unwraps data keys. The key-encryption key never leaves it."""
+
+    def wrap(self, data_key: bytes) -> bytes: ...
+
+    def unwrap(self, wrapped: bytes) -> bytes: ...
 
 
-def decrypt_attribute(blob: bytes) -> str:
-    nonce, body = blob[:16], blob[16:]
-    stream = _keystream(nonce, len(body))
-    return bytes(a ^ b for a, b in zip(body, stream)).decode()
+class LocalKms:
+    """Development KMS: AES-GCM key wrap under a key derived from
+    ATTRIBUTE_KEY. Same interface a cloud KMS client would sit behind."""
+
+    def __init__(self, secret: bytes | None = None):
+        self._kek = AESGCM(sha256(secret or settings().attribute_key))
+
+    def wrap(self, data_key: bytes) -> bytes:
+        nonce = os.urandom(_NONCE)
+        return nonce + self._kek.encrypt(nonce, data_key, b"dek")
+
+    def unwrap(self, wrapped: bytes) -> bytes:
+        return self._kek.decrypt(wrapped[:_NONCE], wrapped[_NONCE:], b"dek")
 
 
-def _keystream(nonce: bytes, length: int) -> bytes:
-    key = settings().attribute_key
-    out = b""
-    counter = 0
-    while len(out) < length:
-        out += hashlib.sha256(key + nonce + counter.to_bytes(4, "big")).digest()
-        counter += 1
-    return out[:length]
+_NONCE = 12
+_VERSION = b"\x01"
+_WRAPPED_LEN = _NONCE + 32 + 16  # nonce + data key + GCM tag (LocalKms)
+
+
+def encrypt_attribute(plaintext: str, kms: KmsPort | None = None) -> bytes:
+    """version | wrapped data key | nonce | ciphertext+tag."""
+    kms = kms or LocalKms()
+    data_key = AESGCM.generate_key(bit_length=256)
+    wrapped = kms.wrap(data_key)
+    nonce = os.urandom(_NONCE)
+    body = AESGCM(data_key).encrypt(nonce, plaintext.encode(), _VERSION)
+    return _VERSION + wrapped + nonce + body
+
+
+def decrypt_attribute(blob: bytes, kms: KmsPort | None = None) -> str:
+    """Raises cryptography.exceptions.InvalidTag if anything was altered."""
+    if blob[:1] != _VERSION:
+        raise ValueError("unknown attribute encryption version")
+    kms = kms or LocalKms()
+    wrapped = blob[1:1 + _WRAPPED_LEN]
+    nonce = blob[1 + _WRAPPED_LEN:1 + _WRAPPED_LEN + _NONCE]
+    body = blob[1 + _WRAPPED_LEN + _NONCE:]
+    return AESGCM(kms.unwrap(wrapped)).decrypt(nonce, body, _VERSION).decode()

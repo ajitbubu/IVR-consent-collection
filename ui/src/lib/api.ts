@@ -29,7 +29,7 @@ async function get<T>(path: string, params?: Record<string, unknown>): Promise<T
 // ---------------------------------------------------------------- types
 
 export type Decision = 'granted' | 'declined' | 'withdrawn'
-export type Provider = 'exotel' | 'twilio'
+export type Provider = 'exotel' | 'twilio' | 'sprinklr'
 
 export interface ConsentRow {
   consent_id: string

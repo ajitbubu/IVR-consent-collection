@@ -45,6 +45,22 @@ class Verification:
         return self.reason not in ("provider does not sign webhooks",)
 
 
+@dataclass
+class CallDetails:
+    """What the provider's authenticated call-details API says happened."""
+
+    status: str | None
+    from_number: str | None
+    to_number: str | None
+    answered_by: str | None = None
+    ended_at: dt.datetime | None = None
+
+
+class CallLookupUnavailable(Exception):
+    """The provider API could not answer now (network, 5xx, 429, auth).
+    Try again later; this says nothing about the call."""
+
+
 class TelephonyProvider(Protocol):
     name: str
 

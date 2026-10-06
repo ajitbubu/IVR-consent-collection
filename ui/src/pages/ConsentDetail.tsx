@@ -123,7 +123,9 @@ export default function ConsentDetail() {
               <p className="muted" style={{ marginBottom: 0 }}>
                 {c.provider === 'twilio'
                   ? `${signed} verified, ${rejected} rejected. The signature is kept, so this consent stays re-verifiable.`
-                  : 'Exotel does not sign its webhooks, so authenticity rests on the IP allowlist and on corroborating the call.'}
+                  : c.provider === 'sprinklr'
+                    ? `${signed} verified, ${rejected} rejected. Sprinklr authenticates with a shared token, which cannot be re-verified later.`
+                    : 'Exotel does not sign its webhooks, so authenticity rests on the IP allowlist and on corroborating the call.'}
               </p>
             </>
           )}

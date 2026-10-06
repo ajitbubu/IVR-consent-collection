@@ -28,7 +28,7 @@ class SessionCreate(BaseModel):
     phone_e164: str
     purpose_key: str
     language: str = "eng"
-    provider: str = Field(default="exotel", pattern="^(exotel|twilio)$")
+    provider: str = Field(default="exotel", pattern="^(exotel|twilio|sprinklr)$")
 
 
 class SessionCreated(BaseModel):
@@ -134,7 +134,7 @@ def read_evidence(consent_id: str, db: Session = Depends(get_session)) -> dict:
 
 class WithdrawRequest(BaseModel):
     purpose_key: str
-    channel: str = "agent"
+    channel: str = Field(default="agent", pattern="^(ivr_inbound|ivr_outbound|web|app|agent)$")
     reason: str | None = None
 
 
@@ -151,7 +151,7 @@ def withdraw(
     try:
         sess = create_session(
             db,
-            direction="ivr_inbound" if body.channel.startswith("ivr") else "ivr_inbound",
+            direction=body.channel,
             phone_raw=phone_e164,
             purpose_code=body.purpose_key,
         )

@@ -66,11 +66,45 @@ class Settings:
         default_factory=lambda: _env("PUBLIC_BASE_URL", "http://localhost:8088")
     )
 
+    # Recordings and daily digests. Local filesystem for now; everything goes
+    # through app/storage.py so an object store can replace it later.
+    evidence_dir: str = field(default_factory=lambda: _env("EVIDENCE_DIR", "var/evidence"))
+
+    # Sprinklr's IVR HTTP nodes send this as "Authorization: Bearer <token>".
+    # Unset means every Sprinklr request is rejected.
+    sprinklr_webhook_token: str = field(
+        default_factory=lambda: _env("SPRINKLR_WEBHOOK_TOKEN", "unset")
+    )
+
+    # Sprinklr REST API (OAuth 2.0 code grant), for calls from us to Sprinklr.
+    # The environment is the instance's "sentry-environment" (prod, prod0,
+    # prod2, ...); "prod" has no path segment in API URLs.
+    sprinklr_api_key: str = field(default_factory=lambda: _env("SPRINKLR_API_KEY", "unset"))
+    sprinklr_api_secret: str = field(default_factory=lambda: _env("SPRINKLR_API_SECRET", "unset"))
+    # TODO(sprinklr): "spr-uat" is a placeholder, not a documented environment.
+    # Replace it with the instance's sentry-environment once there is one.
+    sprinklr_env: str = field(default_factory=lambda: _env("SPRINKLR_ENV", "spr-uat"))
+    sprinklr_redirect_uri: str = field(
+        default_factory=lambda: _env(
+            "SPRINKLR_REDIRECT_URI", "https://localhost:8088/sprinklr/oauth/callback")
+    )
+    sprinklr_api_base: str = field(
+        default_factory=lambda: _env("SPRINKLR_API_BASE", "https://api3.sprinklr.com")
+    )
+    # Off until there is a live instance: gates token refresh in app.jobs and
+    # the call-details lookup used by reconciliation.
+    sprinklr_api_enabled: bool = field(
+        default_factory=lambda: _env("SPRINKLR_API_ENABLED", "false").lower() == "true"
+    )
+
     default_provider: str = field(default_factory=lambda: _env("DEFAULT_PROVIDER", "exotel"))
     default_country_code: str = "91"
     outbox_max_attempts: int = 12
     outbox_base_backoff_s: int = 5
     outbox_max_backoff_s: int = 900
+    recording_max_attempts: int = 12
+    # A call younger than this may still be in progress at the provider.
+    reconcile_after_s: int = 300
 
 
 _settings: Settings | None = None

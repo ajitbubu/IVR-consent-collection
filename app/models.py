@@ -107,6 +107,7 @@ class IvrSession(Base):
     answered_by = Column(Text)
     outcome = Column(Text, nullable=False, default="in_progress")
     reconciled_at = Column(DateTime(timezone=True))
+    reconcile_result = Column(Text)
     provider = Column(Text, nullable=False, default="exotel")
 
 
@@ -121,6 +122,9 @@ class CallArtifact(Base):
     captured_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     purge_after = Column(DateTime(timezone=True), nullable=False)
     purged_at = Column(DateTime(timezone=True))
+    source_url = Column(Text)
+    fetch_attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text)
 
 
 class WebhookReceipt(Base):
@@ -185,6 +189,18 @@ class ConsentEvent(Base):
     occurred_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     prev_hash = Column(LargeBinary)
     entry_hash = Column(LargeBinary, nullable=False)
+
+
+class SprinklrOauthToken(Base):
+    """Encrypted at rest with the same envelope encryption as attributes."""
+
+    __tablename__ = "sprinklr_oauth_token"
+    env = Column(Text, primary_key=True)
+    access_token_enc = Column(LargeBinary, nullable=False)
+    refresh_token_enc = Column(LargeBinary, nullable=False)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
 
 class UcmOutbox(Base):

@@ -3,11 +3,19 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import json
+import logging
+from pathlib import PurePosixPath
+from typing import Callable
+from urllib.parse import urlparse
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ulid import ULID
 
+from app import storage
+from app.config import settings
 from app.hashchain import chain_head, verify_chain
 from app.models import (
     CallArtifact,
@@ -19,11 +27,13 @@ from app.models import (
     Purpose,
 )
 
+log = logging.getLogger("evidence")
 
-def queue_recording_fetch(db: Session, sess: IvrSession, exotel_url: str) -> CallArtifact:
-    """Record the intent to fetch. A worker copies the object into our own
-    bucket, hashes it, and fills storage_uri -- Exotel's URL is never the
-    long-term reference."""
+
+def queue_recording_fetch(db: Session, sess: IvrSession, source_url: str) -> CallArtifact:
+    """Record the intent to fetch. fetch_pending_recordings copies the object
+    into our own storage, hashes it, and fills storage_uri -- the provider's
+    URL is never the long-term reference."""
     purpose = db.get(Purpose, sess.purpose_id) if sess.purpose_id else None
     retention_days = purpose.retention_days if purpose else 365
 
@@ -41,6 +51,7 @@ def queue_recording_fetch(db: Session, sess: IvrSession, exotel_url: str) -> Cal
         ivr_session_id=sess.id,
         kind="recording",
         storage_uri=None,
+        source_url=source_url,
         purge_after=dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=retention_days),
     )
     db.add(art)
@@ -58,6 +69,66 @@ def store_recording(
     return artifact
 
 
+Fetcher = Callable[[str, str], bytes]
+
+
+def download(url: str, provider: str) -> bytes:
+    """Twilio enforces HTTP Basic auth on media URLs; Exotel's links are
+    served as-is.
+
+    TODO(sprinklr): how are Sprinklr call recordings accessed, and do their
+    URLs need auth? Sprinklr recordings are fetched with none until then.
+    """
+    auth = None
+    if provider == "twilio":
+        s = settings()
+        auth = (s.twilio_account_sid, s.twilio_auth_token)
+    resp = httpx.get(url, auth=auth, timeout=30.0, follow_redirects=True)
+    resp.raise_for_status()
+    return resp.content
+
+
+def fetch_pending_recordings(
+    db: Session, fetch: Fetcher = download, limit: int = 20
+) -> dict[str, int]:
+    """Copy queued recordings into our own storage. A failure is counted and
+    retried on the next pass, up to recording_max_attempts."""
+    rows = list(
+        db.execute(
+            select(CallArtifact)
+            .where(
+                CallArtifact.kind == "recording",
+                CallArtifact.storage_uri.is_(None),
+                CallArtifact.purged_at.is_(None),
+                CallArtifact.source_url.isnot(None),
+                CallArtifact.fetch_attempts < settings().recording_max_attempts,
+            )
+            .order_by(CallArtifact.captured_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        ).scalars()
+    )
+    counts = {"stored": 0, "failed": 0}
+    for art in rows:
+        sess = db.get(IvrSession, art.ivr_session_id)
+        art.fetch_attempts += 1
+        try:
+            content = fetch(art.source_url, sess.provider)
+        except Exception as exc:  # any failure is retried on a later pass
+            art.last_error = str(exc)[:500]
+            log.warning("recording fetch failed artifact=%s attempt=%s: %s",
+                        art.id, art.fetch_attempts, exc)
+            counts["failed"] += 1
+            continue
+        suffix = PurePosixPath(urlparse(art.source_url).path).suffix
+        key = f"recordings/{art.captured_at:%Y/%m}/{art.id}{suffix}"
+        store_recording(db, art, content, storage.put(key, content))
+        art.last_error = None
+        counts["stored"] += 1
+    db.flush()
+    return counts
+
+
 def purge_expired_artifacts(db: Session, now: dt.datetime | None = None) -> int:
     """Delete the object, keep the row and its hash. What remains is a
     verifiable claim that a recording existed and what it hashed to."""
@@ -71,7 +142,8 @@ def purge_expired_artifacts(db: Session, now: dt.datetime | None = None) -> int:
         ).scalars()
     )
     for art in rows:
-        # delete_object(art.storage_uri) -- storage backend call
+        if art.storage_uri:
+            storage.delete(art.storage_uri)
         art.storage_uri = None
         art.purged_at = now
     db.flush()
@@ -99,6 +171,19 @@ def daily_digest(db: Session, day: dt.date) -> dict:
         heads[k] = head.hex() if head else None
         h.update(k.encode() + (head or b""))
     return {"date": day.isoformat(), "chains": len(keys), "digest": h.hexdigest(), "heads": heads}
+
+
+def anchor_daily_digest(db: Session, day: dt.date) -> str | None:
+    """Write the day's digest once. Returns its URI, or None if that day was
+    already anchored -- a digest is never rewritten."""
+    key = f"digests/{day.isoformat()}.json"
+    if storage.exists(key):
+        return None
+    body = json.dumps(daily_digest(db, day), sort_keys=True, indent=2).encode()
+    try:
+        return storage.put(key, body, write_once=True)
+    except storage.AlreadyStored:
+        return None
 
 
 def evidence_bundle(db: Session, consent_id: str) -> dict:

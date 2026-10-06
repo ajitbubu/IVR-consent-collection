@@ -13,6 +13,8 @@ from app.api import health, router as service_router
 from app.console_api import router as console_router
 from app.identity import PhoneNormalisationError
 from app.routes_exotel import router as exotel_router
+from app.routes_sprinklr import router as sprinklr_router
+from app.routes_sprinklr_oauth import router as sprinklr_oauth_router
 from app.routes_twilio import router as twilio_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -30,9 +32,12 @@ def create_app() -> FastAPI:
     # In production the provider routers are bound to a different hostname
     # from the service API. The Exotel one sits behind an IP allowlist and
     # returns no data, because Exotel cannot sign its requests; the Twilio
-    # one authenticates every request by signature instead.
+    # one authenticates every request by signature instead, and the Sprinklr
+    # one by a shared bearer token.
     app.include_router(exotel_router)
     app.include_router(twilio_router)
+    app.include_router(sprinklr_router)
+    app.include_router(sprinklr_oauth_router)
     app.include_router(service_router)
     app.include_router(console_router)
     app.include_router(health)
