@@ -13,6 +13,7 @@ consent, call and notice, and prints a DPDP consent receipt.
 | [Tutorial: your first consent](#tutorial-your-first-consent-in-10-minutes) | See it work end to end on your laptop |
 | [How-to guides](#how-to-guides) | Connect Twilio or Exotel, place an outbound call, add a purpose, run the tests |
 | [Reference](#reference) | Look up an endpoint, a webhook, a config variable or a behaviour |
+| [doc/onboarding.md](doc/onboarding.md) | Join the project: set up in a day, learn how the parts fit, make common changes |
 | [doc/architecture.md](doc/architecture.md) | Understand how it works and why it is built this way (diagrams, design decisions) |
 | [doc/id-privacy-integration.md](doc/id-privacy-integration.md) | Integrate with the ID-PRIVACY® platform and move to MongoDB |
 | [TODOS.md](TODOS.md) | See known follow-up work and deferred QA issues |
